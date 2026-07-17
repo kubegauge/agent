@@ -1,0 +1,39 @@
+# values.yaml — kubegauge-agent configuration (see README.md).
+
+# Cluster name shown in the KubeGauge dashboard. Empty = release name.
+clusterName: ""
+
+# Base URL of the KubeGauge API this agent pushes to (REQUIRED).
+# e.g. https://api.kubegauge.com — or http://host.docker.internal:8080 for local dev from kind.
+ingestUrl: ""
+
+# Cluster API key from the KubeGauge dashboard wizard (REQUIRED). Stored in a Secret created by
+# this chart and mounted as a file; the key is shown exactly once at creation/rotation.
+apiKey: ""
+
+# Interval between full scans pushed to the API. Plan minimums are enforced server-side
+# (free: 24h, pro/ai: 1h) — a faster interval here just earns polite 429s.
+scanInterval: 1h
+
+image:
+  repository: ghcr.io/slackerwx/kubegauge-agent
+  # Empty = chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+trivy:
+  # false => --no-trivy (KG-SU-003 degrades to info).
+  enabled: true
+
+# Dogfooding: the agent shows up in its own scan; requests/limits are part of passing it.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

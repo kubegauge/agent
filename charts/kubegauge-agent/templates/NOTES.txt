@@ -1,0 +1,14 @@
+KubeGauge agent installed ({{ include "kubegauge-agent.fullname" . }}, namespace {{ .Release.Namespace }}).
+
+The agent is OUTBOUND-ONLY: it pushes scan reports to {{ .Values.ingestUrl }}
+and polls the same API for on-demand scan commands. Nothing connects INTO it.
+
+Watch it work:
+
+   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "kubegauge-agent.fullname" . }} -f
+
+Your cluster appears in the KubeGauge dashboard as "{{ include "kubegauge-agent.clusterName" . }}"
+(first report right after startup; then every {{ .Values.scanInterval }}).
+
+Expected findings against the {{ .Release.Namespace }} namespace itself (by design — see the
+chart README): NetworkPolicy coverage (KG-NP-*) and ResourceQuota/LimitRange (KG-QT-*).

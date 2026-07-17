@@ -1,0 +1,4 @@
+# Clone local do kubernetes-sigs/network-policy-api (ver cabeçalho de main.go)
+policy-assistant-src/
+corpus.json
+policy-assistant-xval

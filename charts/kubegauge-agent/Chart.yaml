@@ -1,0 +1,7 @@
+# Chart.yaml — metadata for the KubeGauge in-cluster agent chart.
+apiVersion: v2
+name: kubegauge-agent
+description: Read-only KubeGauge agent — scans your cluster's security posture through the API server and pushes the report to the KubeGauge API. Outbound-only; no inbound connections.
+type: application
+version: 0.12.0
+appVersion: "0.12.0"

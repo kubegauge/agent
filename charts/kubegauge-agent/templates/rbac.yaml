@@ -1,0 +1,42 @@
+# rbac.yaml — ClusterRole read-only mínimo: exatamente o que snapshot.Take lê, verbo list
+# (get só em configmaps, para a heurística kube-system/kubeadm-config). Sem watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubegauge-agent.fullname" . }}
+  labels:
+    {{- include "kubegauge-agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes, namespaces, pods, serviceaccounts, services, resourcequotas, limitranges, secrets]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [list]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies, ingresses]
+    verbs: [list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, clusterroles, rolebindings, clusterrolebindings]
+    verbs: [list]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubegauge-agent.fullname" . }}
+  labels:
+    {{- include "kubegauge-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubegauge-agent.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubegauge-agent.fullname" . }}
+    namespace: {{ .Release.Namespace }}

@@ -1,0 +1,10 @@
+tools/
+*.md
+charts/
+docs/
+.github/
+LICENSE
+.gitignore
+renovate.json
+Makefile
+schema/

@@ -1,0 +1,434 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/slackerwx/kubegauge-agent/main/schema/agent-report.v1.schema.json",
+  "$ref": "#/$defs/AgentReport",
+  "$defs": {
+    "AgentReport": {
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "agentVersion": {
+          "type": "string"
+        },
+        "clusterName": {
+          "type": "string"
+        },
+        "takenAt": {
+          "type": "string"
+        },
+        "kubernetes": {
+          "$ref": "#/$defs/KubernetesInfo"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "type": "array"
+        },
+        "namespaces": {
+          "items": {
+            "$ref": "#/$defs/NamespaceInfo"
+          },
+          "type": "array"
+        },
+        "workloads": {
+          "items": {
+            "$ref": "#/$defs/WorkloadPosture"
+          },
+          "type": "array"
+        },
+        "rbacFindings": {
+          "items": {
+            "$ref": "#/$defs/RbacFinding"
+          },
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "agentVersion",
+        "clusterName",
+        "takenAt",
+        "kubernetes",
+        "checks",
+        "namespaces",
+        "workloads",
+        "rbacFindings",
+        "network"
+      ]
+    },
+    "CheckResult": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "namespaces": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "affectedResources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "imageFindings": {
+          "items": {
+            "$ref": "#/$defs/ImageVulnFinding"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "namespaces",
+        "affectedResources"
+      ]
+    },
+    "CveRef": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "pkg": {
+          "type": "string"
+        },
+        "installedVersion": {
+          "type": "string"
+        },
+        "fixedVersion": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "severity",
+        "pkg",
+        "installedVersion"
+      ]
+    },
+    "ImageVulnFinding": {
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "critical": {
+          "type": "integer"
+        },
+        "high": {
+          "type": "integer"
+        },
+        "medium": {
+          "type": "integer"
+        },
+        "low": {
+          "type": "integer"
+        },
+        "topCves": {
+          "items": {
+            "$ref": "#/$defs/CveRef"
+          },
+          "type": "array"
+        },
+        "scanError": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "image",
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "KubernetesInfo": {
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "distribution": {
+          "type": "string"
+        },
+        "nodeCount": {
+          "type": "integer"
+        },
+        "namespaceCount": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "version",
+        "distribution",
+        "nodeCount",
+        "namespaceCount"
+      ]
+    },
+    "NamespaceInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "psaEnforce": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "psaAudit": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "psaWarn": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "podCount": {
+          "type": "integer"
+        },
+        "hasDefaultDenyIngress": {
+          "type": "boolean"
+        },
+        "hasDefaultDenyEgress": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "psaEnforce",
+        "psaAudit",
+        "psaWarn",
+        "podCount",
+        "hasDefaultDenyIngress",
+        "hasDefaultDenyEgress"
+      ]
+    },
+    "Network": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/NetworkNode"
+          },
+          "type": "array"
+        },
+        "flows": {
+          "items": {
+            "$ref": "#/$defs/NetworkFlow"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "nodes",
+        "flows"
+      ]
+    },
+    "NetworkFlow": {
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "policy": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "port",
+        "protocol",
+        "verdict",
+        "policy"
+      ]
+    },
+    "NetworkNode": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "namespace",
+        "kind"
+      ]
+    },
+    "RbacFinding": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "subjectKind": {
+          "type": "string"
+        },
+        "binding": {
+          "type": "string"
+        },
+        "bindingKind": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "risk": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "subject",
+        "subjectKind",
+        "binding",
+        "bindingKind",
+        "role",
+        "risk",
+        "reason"
+      ]
+    },
+    "WorkloadPosture": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "psaLevel": {
+          "type": "string"
+        },
+        "runAsNonRoot": {
+          "type": "boolean"
+        },
+        "readOnlyRootFilesystem": {
+          "type": "boolean"
+        },
+        "allowPrivilegeEscalation": {
+          "type": "boolean"
+        },
+        "capabilitiesDropAll": {
+          "type": "boolean"
+        },
+        "seccompProfile": {
+          "type": "string"
+        },
+        "appArmorProfile": {
+          "type": "string"
+        },
+        "automountServiceAccountToken": {
+          "type": "boolean"
+        },
+        "hostNetwork": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "namespace",
+        "kind",
+        "psaLevel",
+        "runAsNonRoot",
+        "readOnlyRootFilesystem",
+        "allowPrivilegeEscalation",
+        "capabilitiesDropAll",
+        "seccompProfile",
+        "appArmorProfile",
+        "automountServiceAccountToken",
+        "hostNetwork"
+      ]
+    }
+  },
+  "title": "KubeGauge AgentReport v1",
+  "description": "Everything the kubegauge-agent ever sends out of your cluster. See docs/what-leaves-your-cluster.md."
+}

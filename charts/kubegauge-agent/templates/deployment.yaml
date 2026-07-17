@@ -1,0 +1,94 @@
+# deployment.yaml — the agent: 1 replica, hardened to pass its own workload checks.
+# Outbound-only (push mode): no inbound connections except the pod-local /healthz for probes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubegauge-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubegauge-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubegauge-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubegauge-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kubegauge-agent.fullname" . }}
+      # O agente PRECISA do token para falar com o API server — montagem consciente.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --cluster-name={{ include "kubegauge-agent.clusterName" . }}
+            - --ingest-url={{ required "ingestUrl is required — the base URL of the KubeGauge API" .Values.ingestUrl }}
+            - --api-key-file=/var/run/kubegauge/api-key
+            - --scan-interval={{ .Values.scanInterval }}
+            - --trivy-cache-dir=/cache/results
+            {{- if not .Values.trivy.enabled }}
+            - --no-trivy
+            {{- end }}
+          env:
+            # Cache do banco de CVEs do trivy (baixado em runtime; some com o pod — emptyDir).
+            - name: TRIVY_CACHE_DIR
+              value: /cache/trivy-db
+            - name: TMPDIR
+              value: /tmp
+          ports:
+            - name: http
+              containerPort: 8787
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: api-key
+              mountPath: /var/run/kubegauge
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: api-key
+          secret:
+            secretName: {{ include "kubegauge-agent.fullname" . }}-api-key
+        - name: cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
