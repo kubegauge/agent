@@ -14,11 +14,11 @@ import (
 func InClusterClient() (*kubernetes.Clientset, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, fmt.Errorf("carregando in-cluster config (o agente precisa rodar dentro de um pod Kubernetes): %w", err)
+		return nil, fmt.Errorf("loading in-cluster config (the agent needs to run inside a Kubernetes pod): %w", err)
 	}
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("construindo clientset: %w", err)
+		return nil, fmt.Errorf("building clientset: %w", err)
 	}
 	return cs, nil
 }

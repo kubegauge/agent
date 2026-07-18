@@ -165,7 +165,7 @@ func (s *Scanner) scanOne(ctx context.Context, ref string) snapshot.ImageScanRes
 	}
 	res, err := parseTrivyJSON(raw)
 	if err != nil {
-		return snapshot.ImageScanResult{ScanError: "parse do JSON do trivy: " + truncate(err.Error(), scanErrorLimit)}
+		return snapshot.ImageScanResult{ScanError: "trivy JSON parse: " + truncate(err.Error(), scanErrorLimit)}
 	}
 	return res
 }

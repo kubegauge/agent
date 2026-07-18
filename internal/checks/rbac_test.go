@@ -277,7 +277,7 @@ func TestRbacFindings(t *testing.T) {
 			ID: "RB-F-001", Subject: "jenkins", SubjectKind: "ServiceAccount",
 			Binding: "jenkins-admin", BindingKind: "ClusterRoleBinding", Role: "cluster-admin",
 			Risk:   "critical",
-			Reason: "Concede cluster-admin (controle total do cluster) a um subject fora das identidades de sistema esperadas.",
+			Reason: "Grants cluster-admin (full control of the cluster) to a subject outside the expected system identities.",
 		}
 		if got[0] != want {
 			t.Errorf("finding = %+v, want %+v", got[0], want)

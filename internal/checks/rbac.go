@@ -122,7 +122,7 @@ var knownDistroDefaultBindings = map[string]string{
 // knownDistroDefaultBindingReason is the RbacFinding.Reason used whenever
 // isKnownDistroDefaultBinding matches, in the same audience-facing voice as this file's other
 // Reason strings.
-const knownDistroDefaultBindingReason = "Binding padrão criado pelo kubeadm (>=1.29), concedendo cluster-admin ao grupo kubeadm:cluster-admins usado pelo certificado do admin.conf — esperado em clusters kubeadm, não uma configuração de operador. Mesmo assim, vale auditar quem tem acesso a esse grupo/certificado."
+const knownDistroDefaultBindingReason = "Default binding created by kubeadm (>=1.29), granting cluster-admin to the kubeadm:cluster-admins group used by the admin.conf certificate — expected on kubeadm clusters, not an operator misconfiguration. Still worth auditing who has access to that group/certificate."
 
 // isKnownDistroDefaultBinding reports whether crb — together with its already-computed set of
 // non-system ("offending") subjects — matches a knownDistroDefaultBindings entry exactly. Both the
@@ -572,9 +572,9 @@ func riskyRoleSets(snap *snapshot.Snapshot) (wildcard map[string]bool, secrets m
 func riskyRoleReason(key string, wildcard, secrets map[string]bool) (reason string, risk string, ok bool) {
 	switch {
 	case wildcard[key]:
-		return `Role concede verbs e/ou apiGroups wildcard ("*"), equivalente a acesso irrestrito aos recursos cobertos.`, "high", true
+		return `Role grants wildcard ("*") verbs and/or apiGroups, equivalent to unrestricted access to the resources it covers.`, "high", true
 	case secrets[key]:
-		return "Role concede get/list/watch em secrets, expondo credenciais do namespace a quem assume este binding.", "high", true
+		return "Role grants get/list/watch on secrets, exposing namespace credentials to whoever assumes this binding.", "high", true
 	default:
 		return "", "", false
 	}
@@ -607,7 +607,7 @@ func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
 					offending = append(offending, subj)
 				}
 			}
-			risk, reason := "critical", "Concede cluster-admin (controle total do cluster) a um subject fora das identidades de sistema esperadas."
+			risk, reason := "critical", "Grants cluster-admin (full control of the cluster) to a subject outside the expected system identities."
 			if isKnownDistroDefaultBinding(crb, offending) {
 				risk, reason = "medium", knownDistroDefaultBindingReason
 			}

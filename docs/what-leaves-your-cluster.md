@@ -13,7 +13,7 @@ from the code (test-enforced). This document is the human-readable tour of every
 
 | Field | Content | Example |
 |---|---|---|
-| `schemaVersion`, `agentVersion` | Wire version + agent build | `1`, `v0.12.0` |
+| `schemaVersion`, `agentVersion` | Wire version + agent build | `1`, `v0.13.0` |
 | `clusterName` | The name YOU configured in the chart | `prod-east` |
 | `takenAt` | Scan timestamp (UTC) | `2026-07-17T12:00:00Z` |
 | `kubernetes` | Version, distribution heuristic, node/namespace counts | `v1.33.1`, `eks`, `12`, `31` |
