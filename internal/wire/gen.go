@@ -14,7 +14,7 @@ import (
 func GenerateSchema() ([]byte, error) {
 	r := &jsonschema.Reflector{}
 	sch := r.Reflect(&AgentReport{})
-	sch.ID = "https://raw.githubusercontent.com/slackerwx/kubegauge-agent/main/schema/agent-report.v1.schema.json"
+	sch.ID = "https://raw.githubusercontent.com/kubegauge/agent/main/schema/agent-report.v1.schema.json"
 	sch.Title = "KubeGauge AgentReport v1"
 	sch.Description = "Everything the kubegauge-agent ever sends out of your cluster. See docs/what-leaves-your-cluster.md."
 	out, err := json.MarshalIndent(sch, "", "  ")
