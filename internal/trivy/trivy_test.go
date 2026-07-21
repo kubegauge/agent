@@ -40,7 +40,7 @@ func TestParseTrivyJSONCountsAndTopCVEs(t *testing.T) {
 	}
 	for i, want := range wantIDs {
 		if res.TopCVEs[i].ID != want {
-			t.Errorf("TopCVEs[%d].ID = %s, want %s (ordem: severidade, depois id)", i, res.TopCVEs[i].ID, want)
+			t.Errorf("TopCVEs[%d].ID = %s, want %s (order: severity, then id)", i, res.TopCVEs[i].ID, want)
 		}
 	}
 	if res.TopCVEs[0].Severity != "critical" || res.TopCVEs[0].FixedVersion != "3.0.13-1" {
@@ -56,7 +56,7 @@ func TestParseTrivyJSONCountsAndTopCVEs(t *testing.T) {
 
 func TestParseTrivyJSONInvalid(t *testing.T) {
 	if _, err := parseTrivyJSON([]byte("not json")); err == nil {
-		t.Error("esperava erro para JSON inválido")
+		t.Error("expected an error for invalid JSON")
 	}
 }
 
@@ -69,9 +69,9 @@ func fixtureRunner(t *testing.T, calls *[]string) runnerFunc {
 	}
 	return func(ctx context.Context, bin string, args ...string) ([]byte, error) {
 		if _, ok := ctx.Deadline(); !ok {
-			t.Error("runner deve receber um context com deadline (timeout por imagem)")
+			t.Error("runner must receive a context with a deadline (per-image timeout)")
 		}
-		*calls = append(*calls, args[len(args)-1]) // último arg = ref da imagem
+		*calls = append(*calls, args[len(args)-1]) // last arg = image ref
 		return data, nil
 	}
 }
@@ -101,7 +101,7 @@ func TestScanSnapshotDedupesAndSkipsSystemNamespaces(t *testing.T) {
 	vulns := s.ScanSnapshot(context.Background(), snap)
 
 	if len(calls) != 1 || calls[0] != "nginx:1.25" {
-		t.Errorf("calls = %v, want exatamente [nginx:1.25] (dedupe + kube-system excluído)", calls)
+		t.Errorf("calls = %v, want exactly [nginx:1.25] (dedupe + kube-system excluded)", calls)
 	}
 	if len(vulns.ByRef) != 1 || vulns.ByRef["nginx:1.25"].Critical != 1 {
 		t.Errorf("ByRef = %+v, want nginx:1.25 com Critical=1 da fixture", vulns.ByRef)
@@ -130,11 +130,11 @@ func TestScanSnapshotErrorPerImageIsNotCached(t *testing.T) {
 		t.Errorf("ScanError = %q, want conter 'manifest unknown'", vulns.ByRef["bad:1.0"].ScanError)
 	}
 	if vulns.ByRef["nginx:1.25"].High != 2 {
-		t.Errorf("imagem ok deve ter sido escaneada normalmente, got %+v", vulns.ByRef["nginx:1.25"])
+		t.Errorf("the healthy image should have been scanned normally, got %+v", vulns.ByRef["nginx:1.25"])
 	}
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
-		t.Errorf("só o sucesso entra no cache: esperava 1 arquivo, got %d", len(entries))
+		t.Errorf("only the success is cached: expected 1 file, got %d", len(entries))
 	}
 }
 
@@ -148,7 +148,7 @@ func TestScanSnapshotUsesCacheOnSecondPass(t *testing.T) {
 
 	failing := func(ctx context.Context, bin string, args ...string) ([]byte, error) {
 		t.Error("segundo pass deveria vir 100% do cache")
-		return nil, errors.New("não deveria executar")
+		return nil, errors.New("should not run")
 	}
 	s2 := testScanner(failing, dir)
 	second := s2.ScanSnapshot(context.Background(), snap)
@@ -178,7 +178,7 @@ func TestScanSnapshotCacheKeyPrefersDigest(t *testing.T) {
 	s.ScanSnapshot(context.Background(), snap)
 
 	if _, err := os.Stat(s.cache.path("sha256:deadbeef")); err != nil {
-		t.Errorf("esperava arquivo de cache sob a chave do digest: %v", err)
+		t.Errorf("expected a cache file under the digest key: %v", err)
 	}
 }
 

@@ -17,7 +17,7 @@ FROM ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} AS trivy
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=build /out/kubegauge-agent /usr/local/bin/kubegauge-agent
-# PATH mínimo: exec.LookPath("trivy") do scanner resolve via PATH.
+# Minimal PATH: the scanner's exec.LookPath("trivy") resolves through PATH.
 ENV PATH=/usr/local/bin
 USER 65532:65532
 EXPOSE 8787

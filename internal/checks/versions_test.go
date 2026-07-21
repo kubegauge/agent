@@ -34,7 +34,7 @@ func TestKubernetesVersionSupportCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "minor após o EOL",
+			name:          "minor past EOL",
 			server:        &version.Info{Major: "1", Minor: "33", GitVersion: "v1.33.2"},
 			now:           base,
 			wantStatus:    "fail",
@@ -97,7 +97,7 @@ func TestKubernetesVersionSupportCheck(t *testing.T) {
 			wantResources: []string{"cluster/v1.33.2"},
 		},
 		{
-			name:          "versão ilegível por completo",
+			name:          "version entirely unreadable",
 			server:        &version.Info{GitVersion: "garbage"},
 			now:           base,
 			wantStatus:    "info",

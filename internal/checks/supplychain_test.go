@@ -170,7 +170,7 @@ func TestImageVulnScanCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("só high vira warn", func(t *testing.T) {
+	t.Run("high alone becomes warn", func(t *testing.T) {
 		snap := vulnSnapshot(
 			&snapshot.ImageVulns{ByRef: map[string]snapshot.ImageScanResult{"api:1.0": {High: 3}}},
 			imageDeployment("default", "api", "api:1.0"),
@@ -231,7 +231,7 @@ func TestImageVulnScanCheck(t *testing.T) {
 		}
 		cve := res.ImageFindings[0].TopCves[0]
 		if cve.ID != "CVE-9" || cve.Severity != "high" || cve.FixedVersion != "2" {
-			t.Errorf("conversão ImageCVE→CveRef incorreta: %+v", cve)
+			t.Errorf("incorrect ImageCVE→CveRef conversion: %+v", cve)
 		}
 	})
 }
@@ -249,7 +249,7 @@ func TestRunCarriesImageFindingsIntoComplianceCheck(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("KG-SU-003 não encontrado no output de Run — check não registrado em All?")
+	t.Fatal("KG-SU-003 missing from Run output — check not registered in All?")
 }
 
 // signatureWebhookCfg builds a ValidatingWebhookConfiguration fixture for the KG-SU-004 tests:
@@ -285,14 +285,14 @@ func TestImageSignatureVerificationCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "match via nome do webhook entry, não só do config (config com nome custom)",
+			name: "match via webhook entry name, not just the config (config with a custom name)",
 			snap: &snapshot.Snapshot{ValidatingWebhookConfigs: []admissionregistrationv1.ValidatingWebhookConfiguration{
 				signatureWebhookCfg("image-policy", "enforcer.policy.sigstore.dev"),
 			}},
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "só kyverno presente vira warn listando os configs (verifyImages não confirmável via webhook)",
+			name: "kyverno alone becomes warn listing the configs (verifyImages not confirmable via webhook)",
 			snap: &snapshot.Snapshot{ValidatingWebhookConfigs: []admissionregistrationv1.ValidatingWebhookConfiguration{
 				signatureWebhookCfg("kyverno-resource-validating-webhook-cfg", "validate.kyverno.svc-fail"),
 				signatureWebhookCfg("kyverno-policy-validating-webhook-cfg", "validate-policy.kyverno.svc"),
@@ -311,12 +311,12 @@ func TestImageSignatureVerificationCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "nenhum webhook config no cluster falha",
+			name: "no webhook config in the cluster fails",
 			snap: &snapshot.Snapshot{},
 			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "só webhooks não relacionados (cert-manager) falha",
+			name: "only unrelated webhooks (cert-manager) fails",
 			snap: &snapshot.Snapshot{ValidatingWebhookConfigs: []admissionregistrationv1.ValidatingWebhookConfiguration{
 				signatureWebhookCfg("cert-manager-webhook", "webhook.cert-manager.io"),
 			}},

@@ -3,7 +3,7 @@
 // SecurityContext (KG-SC-*, secctx.go), Runtime profiles (KG-RT-*, runtime.go), Secrets (KG-SE-*,
 // secrets.go) and Supply Chain (KG-SU-*, supplychain.go) in M3, plus Control Plane (KG-CP-*, and
 // KG-SE-001 — see secrets.go's doc comment for why it moved — both in controlplane.go) via
-// kube-system static pods in M4, plus Versões & Upgrades (KG-VU-*, versions.go) in the platform
+// kube-system static pods in M4, plus Versions & Upgrades (KG-VU-*, versions.go) in the platform
 // batch. Each Check is a pure function of a snapshot.Snapshot; Run below evaluates every
 // registered Check and returns the raw wire results — the push payload. See each category file's
 // doc comment for which mock ids were judged infeasible to compute from the snapshot, and why.
@@ -21,7 +21,7 @@ import (
 // Result is a Check's verdict against one snapshot: everything that depends on live cluster
 // state (the platform's educational catalog supplies everything else — title, explanation, audit
 // command, remediation, docs, framework refs — keyed by the same check id). Namespaces and
-// AffectedResources must always be non-nil (CLAUDE.md's "nunca null" contract invariant, carried
+// AffectedResources must always be non-nil (the wire contract forbids null here, carried
 // through to wire.CheckResult); every concrete Check below is built to guarantee this, and Run
 // also normalizes defensively (nonNilStrings).
 type Result struct {

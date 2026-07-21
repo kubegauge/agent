@@ -4,7 +4,7 @@
 // pods, cluster-wide) rather than controller pod templates, mirroring the mock's own audit
 // commands (`kubectl get pods -A ...`).
 //
-// KG-PS-002 ("Namespaces críticos usam enforce=restricted") is left out: like KG-NP-002, it
+// KG-PS-002 ("critical namespaces use enforce=restricted") is left out: like KG-NP-002, it
 // requires classifying which namespaces are "critical", a concept with no signal in a live
 // cluster snapshot. Unlike KG-NP-002 — where dropping the criticality filter still yields a
 // distinct, useful check (egress vs. ingress default-deny) — doing the same here would just

@@ -84,7 +84,7 @@ func (noUnconfinedProfileCheck) ID() string { return "KG-RT-003" }
 // Unconfined on any container. Deterministic fail, higher-severity than merely missing a profile
 // (KG-RT-001/002): explicitly opting OUT of confinement the runtime would otherwise apply by
 // default is a deliberate weakening, not just an absent hardening step — matching the mock's own
-// framing ("Definir Unconfined explicitamente é PIOR que não definir nada").
+// framing: setting Unconfined explicitly is WORSE than setting nothing at all.
 func (noUnconfinedProfileCheck) Run(snap *snapshot.Snapshot) Result {
 	var resources []string
 	nsSet := map[string]bool{}
@@ -115,7 +115,7 @@ func (seLinuxOptionsCheck) ID() string { return "KG-RT-004" }
 //
 // Status mirrors netpol.go's cniSupportCheck 3-way pattern rather than a binary pass/fail: "info"
 // when nothing is found at all (this cluster may simply not run SELinux-enforcing nodes — the mock
-// itself notes its own demo cluster is Ubuntu/AppArmor, where this "não se aplica"; we genuinely
+// itself notes its own demo cluster is Ubuntu/AppArmor, where this simply does not apply; we
 // cannot tell either way from the snapshot alone), "warn" when a customization is found (a real
 // signal, but with legitimate RHEL/CentOS exceptions that need case-by-case review) — never a false
 // "fail", since we can't confirm the node even enforces SELinux.

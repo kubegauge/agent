@@ -48,7 +48,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 			wantResources: []string{"deploy/external-secrets/external-secrets"},
 		},
 		{
-			name: "Vault Agent Injector reconhecido pela imagem (vault-k8s), nome genérico",
+			name: "Vault Agent Injector recognized by image (vault-k8s), generic name",
 			deployments: []appsv1.Deployment{
 				esmDeployment("vault", "injector", "hashicorp/vault-k8s:1.4.0"),
 			},
@@ -66,7 +66,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 			wantResources: []string{"deploy/kube-system/Sealed-Secrets-Controller"},
 		},
 		{
-			name: "Deployments comuns (sem gestão externa) → info",
+			name: "ordinary Deployments (no external management) → info",
 			deployments: []appsv1.Deployment{
 				esmDeployment("default", "web", "nginx:1.27"),
 				esmDeployment("payments", "gateway", "myco/gateway:2.1"),
@@ -83,7 +83,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name: "múltiplos controllers em namespaces distintos (ordenado)",
+			name: "multiple controllers across distinct namespaces (sorted)",
 			deployments: []appsv1.Deployment{
 				esmDeployment("vault", "vault-agent-injector", "hashicorp/vault-k8s:1.4.0"),
 				esmDeployment("default", "web", "nginx:1.27"),

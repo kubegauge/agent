@@ -69,7 +69,7 @@ func TestIngressTLSCheck(t *testing.T) {
 			wantResources: []string{"ingress/frontend/web"},
 		},
 		{
-			name: "mistura de vários ingresses (ordenado)",
+			name: "mix of several ingresses (sorted)",
 			ingresses: []networkingv1.Ingress{
 				ingress("frontend", "web", []networkingv1.IngressTLS{{Hosts: []string{"app.example.com"}}}, "app.example.com"),
 				ingress("shop", "checkout", nil, "checkout.example.com"),

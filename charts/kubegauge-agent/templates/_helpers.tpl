@@ -1,4 +1,4 @@
-{{/* _helpers.tpl — nomes e labels padrão do kubegauge-agent. */}}
+{{/* _helpers.tpl — standard names and labels for kubegauge-agent. */}}
 {{- define "kubegauge-agent.fullname" -}}
 {{- if contains "kubegauge-agent" .Release.Name -}}
 {{- .Release.Name | trunc 63 | trimSuffix "-" -}}

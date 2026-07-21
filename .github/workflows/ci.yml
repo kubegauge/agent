@@ -1,4 +1,4 @@
-# ci.yml — CI do kubegauge-agent: testes em PR/push; publica imagem multi-arch + chart OCI em tag v*.
+# ci.yml — kubegauge-agent CI: tests on PR/push; publishes multi-arch image + OCI chart on tag v*.
 name: ci
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
       - uses: azure/setup-helm@v4
-      - name: publica o chart como OCI
+      - name: publish the chart as OCI
         env:
           TAG: ${{ github.ref_name }}
         run: |

@@ -48,7 +48,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 			wantResources: []string{"deploy/velero/velero"},
 		},
 		{
-			name: "Velero reconhecido pela imagem, nome genérico",
+			name: "Velero recognized by image, generic name",
 			deployments: []appsv1.Deployment{
 				drDeployment("backup", "backup-controller", "docker.io/velero/velero:v1.13.2"),
 			},
@@ -66,7 +66,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 			wantResources: []string{"deploy/kasten-io/K10-catalog"},
 		},
 		{
-			name: "Deployments sem solução de backup (só app) → warn",
+			name: "Deployments with no backup solution (app only) → warn",
 			deployments: []appsv1.Deployment{
 				drDeployment("default", "frontend", "nginx:1.27"),
 				drDeployment("kube-system", "coredns", "registry.k8s.io/coredns/coredns:v1.11.1"),
@@ -83,7 +83,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name: "várias soluções em namespaces distintos (ordenado)",
+			name: "several solutions across distinct namespaces (sorted)",
 			deployments: []appsv1.Deployment{
 				drDeployment("velero", "velero", "velero/velero:v1.14.0"),
 				drDeployment("default", "frontend", "nginx:1.27"),

@@ -102,7 +102,7 @@ func (configMapCredentialHeuristicCheck) ID() string { return "KG-SE-003" }
 // credentialKeyPattern. warn, not fail: this is a name-based heuristic ("password_policy" or
 // "token_ttl_seconds" would match without actually holding a credential value), so it needs human
 // review rather than being treated as a confirmed violation — the mock's own explanation frames it
-// the same way ("Padrões a caçar", not "sempre é um vazamento").
+// the same way: patterns worth hunting, not a guaranteed leak.
 func (configMapCredentialHeuristicCheck) Run(snap *snapshot.Snapshot) Result {
 	var resources []string
 	nsSet := map[string]bool{}

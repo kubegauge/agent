@@ -18,7 +18,7 @@ spec:
         {{- include "kubegauge-agent.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "kubegauge-agent.fullname" . }}
-      # O agente PRECISA do token para falar com o API server — montagem consciente.
+      # The agent NEEDS this token to talk to the API server — mounted deliberately.
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true

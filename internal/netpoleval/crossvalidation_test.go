@@ -1,6 +1,6 @@
-// Validação cruzada do engine M5 (Aurora Shield): reavalia o corpus golden gerado pelo matcher do
-// policy-assistant (kubernetes-sigs/network-policy-api, ex-Cyclonus) e exige veredito idêntico.
-// Corpus e decisões de modelagem: collector/tools/policy-assistant-xval/main.go.
+// Cross-validation of the M5 engine (Aurora Shield): re-evaluates the golden corpus produced by the
+// policy-assistant matcher (kubernetes-sigs/network-policy-api, formerly Cyclonus) and demands an
+// identical verdict. Corpus and modeling decisions: tools/policy-assistant-xval/main.go.
 package netpoleval
 
 import (
@@ -92,9 +92,9 @@ func corpusPeer(t *testing.T, key string, pods map[string]*PodInfo) Peer {
 func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 	c := loadCorpus(t)
 
-	// Guardas contra corpus vazio/corrompido passando em silêncio.
+	// Guards against an empty or corrupted corpus passing silently.
 	if len(c.Cases) < 200 {
-		t.Fatalf("corpus suspeito: só %d casos (esperado 200+)", len(c.Cases))
+		t.Fatalf("suspicious corpus: only %d cases (expected 200+)", len(c.Cases))
 	}
 	if len(c.Flows) == 0 {
 		t.Fatal("corpus sem flows")
@@ -149,7 +149,7 @@ func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 		for _, raw := range tc.Policies {
 			var np networkingv1.NetworkPolicy
 			if err := json.Unmarshal(raw, &np); err != nil {
-				t.Fatalf("caso %d (%q): policy inválida: %v", caseIdx, tc.Description, err)
+				t.Fatalf("case %d (%q): invalid policy: %v", caseIdx, tc.Description, err)
 			}
 			policies = append(policies, np)
 		}
@@ -174,7 +174,7 @@ func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 	}
 
 	if totalMismatches > 0 {
-		t.Errorf("validação cruzada: %d divergências em %d/%d casos (detalhadas as %d primeiras; corpus: %s @ %s)",
+		t.Errorf("cross-validation: %d divergences across %d/%d cases (first %d detailed; corpus: %s @ %s)",
 			totalMismatches, affectedCases, len(c.Cases), maxDetailed, c.Meta["source"], c.Meta["commit"])
 	}
 }

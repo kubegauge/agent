@@ -1,4 +1,4 @@
-// versions.go implements the KG-VU-* checks (Versões & Upgrades): version-currency posture read
+// versions.go implements the KG-VU-* checks (Versions & Upgrades): version-currency posture read
 // from snapshot.ServerVersion (the discovery call every snapshot already performs), available on
 // every distribution — managed or not — so unlike controlplane.go there is no
 // isManagedControlPlane gate here.

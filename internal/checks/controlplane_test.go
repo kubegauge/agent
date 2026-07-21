@@ -328,7 +328,7 @@ func TestAlwaysPullImagesAdmissionCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "enable-admission-plugins set without AlwaysPullImages warns (not fail: hardening debatido, ver catálogo)",
+			name: "enable-admission-plugins set without AlwaysPullImages warns (not fail: debated hardening, see catalog)",
 			snap: &snapshot.Snapshot{Pods: []corev1.Pod{staticPod("kube-apiserver-node1", apiserverLabels(), []string{"kube-apiserver", "--enable-admission-plugins=NodeRestriction"})}},
 			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{"pod/kube-system/kube-apiserver-node1"}},
 		},
@@ -361,7 +361,7 @@ func TestPodSecurityAdmissionNotDisabledCheck(t *testing.T) {
 		want Result
 	}{
 		{
-			name: "disable-admission-plugins entirely absent passes (PodSecurity é default desde 1.25)",
+			name: "disable-admission-plugins entirely absent passes (PodSecurity is the default since 1.25)",
 			snap: &snapshot.Snapshot{Pods: []corev1.Pod{staticPod("kube-apiserver-node1", apiserverLabels(), []string{"kube-apiserver", "--anonymous-auth=false"})}},
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
@@ -573,7 +573,7 @@ func TestOidcAuthenticationCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "neither flag present warns (not fail: cert-based authn não é insegura em si)",
+			name: "neither flag present warns (not fail: cert-based authn is not insecure in itself)",
 			snap: &snapshot.Snapshot{Pods: []corev1.Pod{staticPod("kube-apiserver-node1", apiserverLabels(), []string{"kube-apiserver", "--anonymous-auth=false"})}},
 			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{"pod/kube-system/kube-apiserver-node1"}},
 		},

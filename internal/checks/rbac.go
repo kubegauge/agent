@@ -6,8 +6,8 @@
 // systemAuthenticatedDefaultBindings bootstrap allowlist). It also derives report.RbacFinding
 // entries (RbacFindings) from the same binding/role analysis.
 //
-// KG-RB-004/005 were originally left out of M2 (see BACKLOG.md "Checks do catálogo sem
-// implementação Go") and closed on 2026-07-10: RB-004's blocker fell to a scoped resolver that
+// KG-RB-004/005 were originally left out of M2 (catalog entries with no Go implementation behind
+// them) and closed on 2026-07-10: RB-004's blocker fell to a scoped resolver that
 // only answers "does this roleRef grant create pods" (no aggregation/resourceNames modeling), and
 // RB-005's to the same name+shape allowlist pattern KG-RB-001 already used for kubeadm.
 package checks

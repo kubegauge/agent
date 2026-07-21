@@ -48,7 +48,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 			wantResources: []string{"daemonset/falco/falco"},
 		},
 		{
-			name: "Tetragon reconhecido pela imagem, nome genérico",
+			name: "Tetragon recognized by image, generic name",
 			daemonSets: []appsv1.DaemonSet{
 				rtDaemonSet("kube-system", "runtime-agent", "quay.io/cilium/tetragon:v1.1.0"),
 			},
@@ -66,7 +66,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 			wantResources: []string{"daemonset/security/KubeArmor"},
 		},
 		{
-			name: "DaemonSets sem ferramenta de detecção (só logging) → warn",
+			name: "DaemonSets with no detection tool (logging only) → warn",
 			daemonSets: []appsv1.DaemonSet{
 				rtDaemonSet("logging", "fluentd", "fluent/fluentd:v1.16"),
 				rtDaemonSet("kube-system", "kube-proxy", "registry.k8s.io/kube-proxy:v1.30.0"),
@@ -83,7 +83,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name: "vários detectores em namespaces distintos (ordenado)",
+			name: "several detectors across distinct namespaces (sorted)",
 			daemonSets: []appsv1.DaemonSet{
 				rtDaemonSet("falco", "falco", "falcosecurity/falco:0.38.0"),
 				rtDaemonSet("logging", "fluentd", "fluent/fluentd:v1.16"),

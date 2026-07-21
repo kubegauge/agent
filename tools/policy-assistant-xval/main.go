@@ -1,30 +1,30 @@
-// Ferramenta de validação cruzada do M5 (Aurora Shield): gera o corpus golden de
-// testdata/policy_assistant_corpus.json.gz consumido por netpoleval/crossvalidation_test.go.
+// M5 cross-validation tool (Aurora Shield): generates the golden corpus in
+// testdata/policy_assistant_corpus.json.gz consumed by netpoleval/crossvalidation_test.go.
 //
-// Ela usa o matcher do policy-assistant (kubernetes-sigs/network-policy-api, ex-Cyclonus) como
-// oráculo: para cada caso do gerador oficial de policies (filtrado para ações só-CreatePolicy,
-// i.e. variantes semânticas puras sem mutação de cluster), avalia todos os flows de uma matriz
-// de tráfego fixa e grava o veredito allowed/denied. O teste do collector reavalia os mesmos
-// flows com o nosso engine e compara.
+// It uses the policy-assistant matcher (kubernetes-sigs/network-policy-api, formerly Cyclonus) as
+// the oracle: for every case from the official policy generator (filtered to CreatePolicy-only
+// actions, i.e. pure semantic variants with no cluster mutation), it evaluates every flow of a
+// fixed traffic matrix and records the allowed/denied verdict. The agent's test re-evaluates the
+// same flows with our engine and compares.
 //
-// Como regenerar o corpus (o clone é gitignored; commit pinado no meta.commit do corpus):
+// Regenerating the corpus (the clone is gitignored; the commit is pinned in the corpus meta.commit):
 //
 //	git clone --depth 1 https://github.com/kubernetes-sigs/network-policy-api.git policy-assistant-src
 //	go mod tidy
 //	go run . > corpus.json && gzip -9 -c corpus.json > ../../internal/netpoleval/testdata/policy_assistant_corpus.json.gz
 //
-// Decisões que evitam falsos positivos de divergência:
+// Decisions that avoid false-positive divergences:
 //
-//   - ipBlock: o matcher deles casa ipBlock contra o IP de QUALQUER peer, inclusive pods; o nosso
-//     engine (por design do produto — Peer de pod não tem IP) escopa ipBlock a endpoints externos,
-//     como a doc oficial. Os IPs sintéticos dos pods (10.96.0.0/16) são disjuntos dos CIDRs que o
-//     gerador constrói ao redor do podIP (192.168.100.0/24), então ipBlock nunca casa pod interno
-//     em nenhum dos dois engines e a comparação fica justa. IPs externos são escolhidos dentro do
-//     CIDR, dentro do except e fora, para exercitar ipBlock de verdade.
-//   - Named ports: espelha o probe sintético deles — para destino pod, cada container port vira um
-//     probe com (porta, protocolo, nome); portas não servidas (79/82/7981) e destinos externos
-//     têm nome vazio.
-//   - Labels de namespace: {"ns": <nome>} + kubernetes.io/metadata.name injetado, como o API server.
+//   - ipBlock: their matcher tests ipBlock against the IP of ANY peer, pods included; our engine
+//     (by product design — a pod Peer carries no IP) scopes ipBlock to external endpoints, as the
+//     official docs do. The synthetic pod IPs (10.96.0.0/16) are disjoint from the CIDRs the
+//     generator builds around the podIP (192.168.100.0/24), so ipBlock never matches an internal
+//     pod in either engine and the comparison stays fair. External IPs are picked inside the CIDR,
+//     inside the except block and outside both, so ipBlock is genuinely exercised.
+//   - Named ports: mirrors their synthetic probe — for a pod target, every container port becomes a
+//     probe of (port, protocol, name); unserved ports (79/82/7981) and external targets carry an
+//     empty name.
+//   - Namespace labels: {"ns": <name>} plus an injected kubernetes.io/metadata.name, like the API server.
 package main
 
 import (
@@ -43,7 +43,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 )
 
-// podIP é a semente dos CIDRs de ipBlock do gerador (MakeCIDRFromZeroes → 192.168.100.0/24 e /28).
+// podIP seeds the generator's ipBlock CIDRs (MakeCIDRFromZeroes → 192.168.100.0/24 and /28).
 const podIP = "192.168.100.5"
 
 type corpusPort struct {
@@ -118,7 +118,7 @@ func buildPods() []corpusPod {
 // externalIPs: dentro do CIDR /24 (fora do except /28), dentro do except /28, e fora de tudo.
 var externalIPs = []string{"192.168.100.100", "192.168.100.5", "8.8.8.8"}
 
-// unservedProbes exercita endPort ranges e named ports não resolvíveis (nenhum pod serve).
+// unservedProbes exercises endPort ranges and unresolvable named ports (no pod serves them).
 var unservedProbes = []corpusPort{
 	{Port: 79, Protocol: "TCP"}, {Port: 79, Protocol: "UDP"},
 	{Port: 82, Protocol: "TCP"}, {Port: 82, Protocol: "UDP"},
@@ -188,8 +188,8 @@ func trafficPeer(key string, podByKey map[string]corpusPod) *matcher.TrafficPeer
 	}
 }
 
-// collectPolicies devolve as policies de um caso composto apenas por ações CreatePolicy, ou
-// ok=false quando o caso muta cluster (update/delete/pods/namespaces) ou repete (ns, name).
+// collectPolicies returns the policies of a case made up solely of CreatePolicy actions, or
+// ok=false when the case mutates the cluster (update/delete/pods/namespaces) or repeats (ns, name).
 func collectPolicies(tc *generator.TestCase) (policies []*networkingv1.NetworkPolicy, ok bool) {
 	seen := map[string]bool{}
 	for _, step := range tc.Steps {

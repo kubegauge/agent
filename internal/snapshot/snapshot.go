@@ -114,7 +114,7 @@ type Snapshot struct {
 	// this particular Get (403, 404, or otherwise) is treated as "not found" rather
 	// than failing the whole snapshot, since it is not part of the core B4 resource
 	// list and the heuristic must degrade gracefully. This is a deliberate, narrow
-	// deviation from "coletar apenas os listados": the field is required for the B5
+	// deviation from "collect only what is listed": the field is required for the B5
 	// distribution heuristic and report.DetectDistribution/wire.Build only ever see the
 	// Snapshot, never a live client, so the lookup has to happen here.
 	KubeadmConfigMapFound bool

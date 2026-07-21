@@ -69,8 +69,8 @@ func nwDenyAll(namespace, name string, direction networkingv1.PolicyType) networ
 	}
 }
 
-// nwAllowAllByIPBlock: egress liberado para 0.0.0.0/0 — combinado com deny-all, é o par de
-// policies cuja semântica a validação cruzada com o policy-assistant pinou (ipBlock casa pod IP).
+// nwAllowAllByIPBlock: egress opened to 0.0.0.0/0 — combined with deny-all, this is the policy pair
+// whose semantics the policy-assistant cross-validation pinned down (ipBlock matches pod IP).
 func nwAllowAllByIPBlock(namespace, name string) networkingv1.NetworkPolicy {
 	return networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -84,7 +84,7 @@ func nwAllowAllByIPBlock(namespace, name string) networkingv1.NetworkPolicy {
 	}
 }
 
-// nwOwnedPod builds a live pod owned by a controller: fonte de IP representativo, nunca um nó.
+// nwOwnedPod builds a live pod owned by a controller: a representative IP source, never a node.
 func nwOwnedPod(namespace, name string, labels map[string]string, ip string) corev1.Pod {
 	return corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -505,8 +505,8 @@ func TestBuildNetworkVerdicts(t *testing.T) {
 	})
 }
 
-// ---- resolução de IP representativo (validação cruzada M5: ipBlock casa pod IP quando o
-// snapshot tem o pod live; sem pod live o engine degrada para o modo conservador) ----------------
+// ---- representative IP resolution (M5 cross-validation: ipBlock matches pod IP when the snapshot
+// has the live pod; with no live pod the engine degrades to conservative mode) --------------------
 
 func TestBuildNetworkPodIPResolution(t *testing.T) {
 	byIP := strPtr("web/allow-all-by-ip")
@@ -542,7 +542,7 @@ func TestBuildNetworkPodIPResolution(t *testing.T) {
 			},
 		},
 		{
-			name: "sem pod live o IP é desconhecido e o veredito permanece conservador (denied)",
+			name: "with no live pod the IP is unknown and the verdict stays conservative (denied)",
 			snap: &snapshot.Snapshot{
 				Namespaces: []corev1.Namespace{nwNamespace("web")},
 				Deployments: []appsv1.Deployment{
@@ -564,7 +564,7 @@ func TestBuildNetworkPodIPResolution(t *testing.T) {
 			},
 		},
 		{
-			name: "bare pod usa o próprio status.podIP como destino de ipBlock",
+			name: "bare pod uses its own status.podIP as the ipBlock target",
 			snap: &snapshot.Snapshot{
 				Namespaces: []corev1.Namespace{nwNamespace("web")},
 				Deployments: []appsv1.Deployment{

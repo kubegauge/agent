@@ -3,7 +3,7 @@
 // pod isolation defaults, policy additivity, egress-AND-ingress verdicts, the podSelector/
 // namespaceSelector OR-vs-AND peer forms, ipBlock with except, numeric/named/endPort ports,
 // policyTypes defaulting, and the Verdict.Policy attribution rules. Written BEFORE the engine
-// (PLAN-FASE-2.md §8: "suíte de testes de semântica ANTES do engine").
+// (PLAN-FASE-2.md §8: a semantics test suite BEFORE the engine).
 package netpoleval
 
 import (
@@ -483,9 +483,9 @@ func TestEvalIPBlock(t *testing.T) {
 	})
 }
 
-// ---- ipBlock vs pod IPs (validação cruzada com o policy-assistant: o pacote pod→pod carrega o
-// pod IP sem SNAT na maioria dos CNIs, então ipBlock DEVE casar pod peer com IP conhecido; sem IP
-// o engine permanece conservador e nunca casa) ----------------------------------------------------
+// ---- ipBlock vs pod IPs (cross-validated against policy-assistant: a pod→pod packet carries the
+// pod IP without SNAT on most CNIs, so ipBlock MUST match a pod peer with a known IP; with no IP
+// the engine stays conservative and never matches) ------------------------------------------------
 
 func podWithIP(namespace, name, ip string, labels map[string]string) Peer {
 	return Peer{Pod: &PodInfo{Namespace: namespace, Name: name, Labels: labels, IP: ip}}

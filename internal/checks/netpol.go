@@ -5,11 +5,11 @@
 // Every mock KG-NP-* id (001-005) turned out to be computable from the M2 snapshot; none were
 // left out.
 //
-//   - KG-NP-002 ("Namespaces críticos devem restringir egress"): the mock scopes this to
+//   - KG-NP-002 ("critical namespaces must restrict egress"): the mock scopes this to
 //     "critical" namespaces (e.g. "payments" in the demo data), a classification with no signal
 //     on a real cluster (no generic label/annotation identifies "criticality"). We apply the same
 //     default-deny-egress test to every non-system namespace instead — the exact mechanism
-//     PLAN-FASE-2.md §6 lists as computable ("default-deny egress por namespace"), just without
+//     PLAN-FASE-2.md §6 lists as computable (default-deny egress per namespace), just without
 //     the (undecidable) namespace-criticality filter.
 //   - KG-NP-004 ("kube-system protegido contra acesso de workloads") is implemented as a
 //     structural existence check — "does kube-system have at least one Ingress-type

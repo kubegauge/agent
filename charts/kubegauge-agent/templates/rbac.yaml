@@ -1,5 +1,5 @@
-# rbac.yaml — ClusterRole read-only mínimo: exatamente o que snapshot.Take lê, verbo list
-# (get só em configmaps, para a heurística kube-system/kubeadm-config). Sem watch.
+# rbac.yaml — minimal read-only ClusterRole: exactly what snapshot.Take reads, verb list
+# (get only on configmaps, for the kube-system/kubeadm-config heuristic). No watch.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

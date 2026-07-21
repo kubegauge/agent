@@ -38,7 +38,7 @@ func TestDiskCacheMissOnDifferentKey(t *testing.T) {
 	c := newDiskCache(t.TempDir())
 	c.put("sha256:abc", sampleResult(), cacheNow)
 	if _, ok := c.get("registry.example.com/team/api:1.4.2", cacheNow); ok {
-		t.Error("chaves diferentes (digest vs ref) não podem colidir")
+		t.Error("different keys (digest vs ref) must not collide")
 	}
 }
 
@@ -46,7 +46,7 @@ func TestDiskCacheExpiresAfterTTL(t *testing.T) {
 	c := newDiskCache(t.TempDir())
 	c.put("k", sampleResult(), cacheNow)
 	if _, ok := c.get("k", cacheNow.Add(cacheTTL+time.Minute)); ok {
-		t.Error("esperava miss após o TTL de 24h")
+		t.Error("expected a miss after the 24h TTL")
 	}
 }
 
@@ -56,13 +56,13 @@ func TestDiskCacheCorruptFileIsMiss(t *testing.T) {
 	c.put("k", sampleResult(), cacheNow)
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
-		t.Fatalf("esperava 1 arquivo de cache, got %d (err %v)", len(entries), err)
+		t.Fatalf("expected 1 cache file, got %d (err %v)", len(entries), err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, entries[0].Name()), []byte("{corrompido"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.get("k", cacheNow); ok {
-		t.Error("arquivo corrompido deve ser tratado como miss")
+		t.Error("a corrupted file must be treated as a miss")
 	}
 }
 
@@ -71,8 +71,8 @@ func TestNilDiskCacheIsSafe(t *testing.T) {
 	if c != nil {
 		t.Fatal("newDiskCache(\"\") deve retornar nil")
 	}
-	c.put("k", sampleResult(), cacheNow) // não pode panicar
+	c.put("k", sampleResult(), cacheNow) // must not panic
 	if _, ok := c.get("k", cacheNow); ok {
-		t.Error("cache nil nunca dá hit")
+		t.Error("a nil cache never hits")
 	}
 }

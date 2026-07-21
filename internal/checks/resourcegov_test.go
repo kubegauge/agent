@@ -46,7 +46,7 @@ func TestNamespaceResourceQuotaCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "system namespaces sem quota são ignorados",
+			name:          "system namespaces without quota are ignored",
 			namespaces:    []corev1.Namespace{ns("kube-system"), ns("kube-public")},
 			quotas:        nil,
 			wantStatus:    "pass",
@@ -110,7 +110,7 @@ func TestNamespaceLimitRangeCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "system namespace sem limitrange é ignorado",
+			name:          "system namespace without limitrange is ignored",
 			namespaces:    []corev1.Namespace{ns("kube-system")},
 			limitRanges:   nil,
 			wantStatus:    "pass",

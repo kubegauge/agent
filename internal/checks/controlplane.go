@@ -38,7 +38,7 @@
 // Managed-cluster degradation: EKS/GKE/AKS (whose control planes are never exposed as static pods,
 // by the provider's own design) and any cluster where the API server itself isn't visible as a
 // static pod hide the control plane entirely, so every check below reports "info" rather than
-// guessing pass/fail from nothing — control plane invisível em managed. See
+// guessing pass/fail from nothing — on managed clusters the control plane is invisible. See
 // isManagedControlPlane's doc comment for exactly which signal decides this and why, and
 // controlPlaneFlagResult's for the narrower, additional fallback this file layers on top of it.
 package checks
