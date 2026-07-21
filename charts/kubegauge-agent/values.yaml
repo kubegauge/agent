@@ -16,7 +16,7 @@ apiKey: ""
 scanInterval: 1h
 
 image:
-  repository: ghcr.io/slackerwx/kubegauge-agent
+  repository: ghcr.io/kubegauge/agent
   # Empty = chart appVersion.
   tag: ""
   pullPolicy: IfNotPresent

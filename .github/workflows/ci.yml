@@ -47,8 +47,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/slackerwx/kubegauge-agent:${{ github.ref_name }}
-            ghcr.io/slackerwx/kubegauge-agent:latest
+            ghcr.io/kubegauge/agent:${{ github.ref_name }}
+            ghcr.io/kubegauge/agent:latest
           build-args: |
             VERSION=${{ github.ref_name }}
       - uses: azure/setup-helm@v4
@@ -59,4 +59,4 @@ jobs:
           VERSION="${TAG#v}"
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           helm package charts/kubegauge-agent --version "$VERSION" --app-version "$TAG"
-          helm push "kubegauge-agent-$VERSION.tgz" oci://ghcr.io/slackerwx/charts
+          helm push "kubegauge-agent-$VERSION.tgz" oci://ghcr.io/kubegauge/charts

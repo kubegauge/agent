@@ -14,7 +14,7 @@ KubeGauge API. One agent per cluster, installed with a single `helm install`.
 ## Install
 
 ```sh
-helm install kubegauge-agent oci://ghcr.io/slackerwx/charts/kubegauge-agent \
+helm install kubegauge-agent oci://ghcr.io/kubegauge/charts/kubegauge-agent \
   --namespace kubegauge --create-namespace \
   --set clusterName=<name> --set ingestUrl=https://<api> --set apiKey=<kga_...>
 ```

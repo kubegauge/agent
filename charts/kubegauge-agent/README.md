@@ -10,7 +10,7 @@ the KubeGauge API. No inbound connections, no Service, no exposed ports (only a 
 ## Install
 
 ```sh
-helm install kubegauge-agent oci://ghcr.io/slackerwx/charts/kubegauge-agent \
+helm install kubegauge-agent oci://ghcr.io/kubegauge/charts/kubegauge-agent \
   --namespace kubegauge --create-namespace \
   --set clusterName=<name shown in the dashboard> \
   --set ingestUrl=https://<your kubegauge api> \
