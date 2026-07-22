@@ -98,12 +98,15 @@ func (r *Runner) key() (string, error) {
 }
 
 func (r *Runner) scanAndPush(ctx context.Context) {
+	start := r.now()
+	r.logf("scanning cluster")
 	rpt, err := r.scan(ctx)
 	if err != nil {
 		r.logf("scan failed: %v (will retry on next tick)", err)
 		return
 	}
 	r.pending = rpt
+	r.logf("scan complete in %s (%d checks)", r.now().Sub(start).Round(time.Second), len(rpt.Checks))
 	r.PushPending(ctx)
 }
 
@@ -124,6 +127,7 @@ func (r *Runner) PushPending(ctx context.Context) {
 		status, retryAfter, err := r.postOnce(ctx, body)
 		switch {
 		case err == nil && (status == http.StatusAccepted || status == http.StatusOK):
+			r.logf("report delivered")
 			r.pending = nil
 			return
 		case status == http.StatusUnauthorized:

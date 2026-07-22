@@ -7,11 +7,13 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -184,5 +186,27 @@ func TestPollIdleDeliversPendingReport(t *testing.T) {
 
 	if ingests.Load() != 1 || r.pending != nil {
 		t.Fatalf("idle poll must deliver the pending report (ingests=%d pending=%v)", ingests.Load(), r.pending != nil)
+	}
+}
+
+// TestScanAndPushLogsProgress: a healthy scan+push emits a start, a scan-complete (with timing so
+// the trivy DB-download latency is visible) and a delivery line — so an operator can tell "working"
+// from "hung" without opening the dashboard.
+func TestScanAndPushLogsProgress(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	r := newTestRunner(t, srv.URL)
+	var logs []string
+	r.logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	r.scanAndPush(context.Background())
+
+	joined := strings.Join(logs, "\n")
+	for _, want := range []string{"scanning cluster", "scan complete", "report delivered"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in progress logs; got:\n%s", want, joined)
+		}
 	}
 }

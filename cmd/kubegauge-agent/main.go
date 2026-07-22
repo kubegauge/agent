@@ -69,12 +69,17 @@ func main() {
 		}
 	}()
 
+	firstTrivy := true
 	scan := func(ctx context.Context) (*wire.AgentReport, error) {
 		snap, err := snapshot.Take(ctx, cs)
 		if err != nil {
 			return nil, err
 		}
 		if scanner != nil {
+			if firstTrivy {
+				fmt.Fprintln(os.Stderr, "kubegauge-agent: first image scan may download the trivy CVE database (can take a few minutes)")
+				firstTrivy = false
+			}
 			snap.ImageVulns = scanner.ScanSnapshot(ctx, snap)
 		}
 		return wire.Build(snap, *clusterName, version, time.Now(), checks.Run(snap), checks.RbacFindings(snap)), nil
