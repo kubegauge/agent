@@ -617,12 +617,12 @@ func TestEncryptionAtRestCheck(t *testing.T) {
 	}
 }
 
-// TestManagedControlPlaneDegradesEveryCheckToInfo is the dedicated test for this milestone's
-// "cluster managed (sem static pods) -> tudo info" requirement: every KG-CP-*/KG-SE-001 check
-// implemented in controlplane.go, run against either an EKS-shaped snapshot or a bare snapshot
-// with no control-plane static pods at all, must report info with empty resources — never a guess.
-func TestManagedControlPlaneDegradesEveryCheckToInfo(t *testing.T) {
-	wantInfo := Result{Status: "info", Namespaces: []string{}, AffectedResources: []string{}}
+// TestManagedControlPlaneDegradesEveryCheckToNA is the dedicated test for this behavior: every
+// KG-CP-*/KG-SE-001 check implemented in controlplane.go, run against either an EKS-shaped snapshot
+// or a bare snapshot with no control-plane static pods at all, must report "na" (not applicable —
+// the control plane is managed and cannot be introspected) with empty resources, never a guess.
+func TestManagedControlPlaneDegradesEveryCheckToNA(t *testing.T) {
+	wantNA := Result{Status: "na", Namespaces: []string{}, AffectedResources: []string{}}
 
 	controlPlaneChecks := []Check{
 		apiserverAnonymousAuthCheck{},
@@ -649,8 +649,8 @@ func TestManagedControlPlaneDegradesEveryCheckToInfo(t *testing.T) {
 		for _, c := range controlPlaneChecks {
 			t.Run(snapName+"/"+c.ID(), func(t *testing.T) {
 				got := c.Run(snap)
-				if !reflect.DeepEqual(got, wantInfo) {
-					t.Errorf("Run() = %+v, want %+v", got, wantInfo)
+				if !reflect.DeepEqual(got, wantNA) {
+					t.Errorf("Run() = %+v, want %+v", got, wantNA)
 				}
 			})
 		}

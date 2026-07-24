@@ -37,9 +37,9 @@
 //
 // Managed-cluster degradation: EKS/GKE/AKS (whose control planes are never exposed as static pods,
 // by the provider's own design) and any cluster where the API server itself isn't visible as a
-// static pod hide the control plane entirely, so every check below reports "info" rather than
-// guessing pass/fail from nothing — on managed clusters the control plane is invisible. See
-// isManagedControlPlane's doc comment for exactly which signal decides this and why, and
+// static pod hide the control plane entirely, so every check below reports "na" (not applicable)
+// rather than guessing pass/fail from nothing — on managed clusters the control plane is invisible.
+// See isManagedControlPlane's doc comment for exactly which signal decides this and why, and
 // controlPlaneFlagResult's for the narrower, additional fallback this file layers on top of it.
 package checks
 
@@ -187,8 +187,8 @@ func commaListContains(value, entry string) bool {
 
 // controlPlaneFlagResult is the shared evaluation shape for every check in this file:
 //
-//  1. degrade to "info" on a managed control plane (isManagedControlPlane) — the gate this
-//     milestone's brief specifies, shared identically by every check below;
+//  1. degrade to "na" (not applicable) on a managed control plane (isManagedControlPlane) — the
+//     gate this behavior specifies, shared identically by every check below;
 //  2. degrade to "info" too if THIS check's own component simply has no static pod in the
 //     snapshot at all. This is a narrower fallback ADDED on top of (1), which is keyed on the
 //     apiserver alone: without it, KG-CP-003 (etcd) would silently report a false "pass" against,
@@ -205,7 +205,7 @@ func commaListContains(value, entry string) bool {
 // "fail".
 func controlPlaneFlagResult(snap *snapshot.Snapshot, namePrefix, component, status string, compliant func(flags map[string]string) bool) Result {
 	if isManagedControlPlane(snap) {
-		return Result{Status: "info", Namespaces: []string{}, AffectedResources: []string{}}
+		return Result{Status: "na", Namespaces: []string{}, AffectedResources: []string{}}
 	}
 
 	pods := controlPlanePods(snap, namePrefix, component)
@@ -380,7 +380,7 @@ func (profilingDisabledCheck) ID() string { return "KG-CP-011" }
 // scheduler/controller-manager visibility would false-fail self-hosted-but-not-kubeadm layouts.
 func (profilingDisabledCheck) Run(snap *snapshot.Snapshot) Result {
 	if isManagedControlPlane(snap) {
-		return Result{Status: "info", Namespaces: []string{}, AffectedResources: []string{}}
+		return Result{Status: "na", Namespaces: []string{}, AffectedResources: []string{}}
 	}
 
 	var pods []corev1.Pod
