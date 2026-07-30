@@ -3,6 +3,9 @@
 {{- if and (hasPrefix "http://" .Values.ingestUrl) (not .Values.allowInsecureHttp) }}
 {{- fail "ingestUrl uses http://, which would send the cluster API key in cleartext. Use https://, or set allowInsecureHttp=true if this is a local development endpoint." }}
 {{- end }}
+{{- if and (not .Values.apiKey) (not .Values.existingSecret) }}
+{{- fail "set apiKey (from the KubeGauge dashboard wizard), or existingSecret to name a Secret you manage that holds it." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -82,7 +85,11 @@ spec:
       volumes:
         - name: api-key
           secret:
-            secretName: {{ include "kubegauge-agent.fullname" . }}-api-key
+            secretName: {{ include "kubegauge-agent.apiKeySecretName" . }}
+            # Mapped to a fixed filename so --api-key-file does not depend on the key's name.
+            items:
+              - key: {{ .Values.existingSecretKey }}
+                path: api-key
         - name: cache
           emptyDir:
             sizeLimit: {{ .Values.cacheSizeLimit }}

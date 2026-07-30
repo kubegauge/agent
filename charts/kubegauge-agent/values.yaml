@@ -12,9 +12,21 @@ ingestUrl: ""
 # http://host.docker.internal:8080) is what this exists for.
 allowInsecureHttp: false
 
-# Cluster API key from the KubeGauge dashboard wizard (REQUIRED). Stored in a Secret created by
-# this chart and mounted as a file; the key is shown exactly once at creation/rotation.
+# Cluster API key from the KubeGauge dashboard wizard. Required UNLESS existingSecret is set.
+# Stored in a Secret created by this chart and mounted as a file; the key is shown exactly once at
+# creation/rotation.
+#
+# Passing it here also writes it into Helm's release Secret, so anyone who can read that (or run
+# `helm get values`) can recover the key. For a cluster where that matters, create the Secret
+# yourself — from a secrets manager, sealed-secrets, external-secrets — and use existingSecret
+# below instead.
 apiKey: ""
+
+# Name of a Secret you manage that holds the cluster API key. Set it and the chart creates no
+# Secret of its own and never sees the key. The Secret must live in the release namespace.
+existingSecret: ""
+# Key inside that Secret holding the API key. Also the key the chart-managed Secret uses.
+existingSecretKey: api-key
 
 # Interval between full scans pushed to the API. Plan minimums are enforced server-side
 # (free: 24h, pro/ai: 1h) — a faster interval here just earns polite 429s.

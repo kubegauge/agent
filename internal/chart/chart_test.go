@@ -76,6 +76,35 @@ func TestDeploymentResolvesImageThroughHelper(t *testing.T) {
 	}
 }
 
+// TestApiKeyCanComeFromAnExistingSecret: passing apiKey inline writes it into Helm's release
+// Secret, where `helm get values` can read it back. Operators must be able to hand the chart a
+// Secret it never sees the contents of — without the inline path regressing.
+func TestApiKeyCanComeFromAnExistingSecret(t *testing.T) {
+	secret := readChartFile(t, "templates/secret.yaml")
+	if !strings.Contains(secret, "if not .Values.existingSecret") {
+		t.Error("templates/secret.yaml must not create a Secret when existingSecret is set")
+	}
+	if !strings.Contains(secret, "required") || !strings.Contains(secret, ".Values.apiKey") {
+		t.Error("templates/secret.yaml must still require apiKey when it does create the Secret")
+	}
+
+	deployment := readChartFile(t, "templates/deployment.yaml")
+	if !strings.Contains(deployment, `include "kubegauge-agent.apiKeySecretName"`) {
+		t.Error("templates/deployment.yaml must mount whichever Secret holds the key, via the helper")
+	}
+	// The key is mounted as a file and passed with --api-key-file: never an env var, never an arg.
+	// Reading .Values.apiKey to decide whether it is SET is fine (the guard above does); emitting
+	// its value into the pod spec is not.
+	for _, emission := range []string{"{{ .Values.apiKey", "{{- .Values.apiKey", "{{.Values.apiKey"} {
+		if strings.Contains(deployment, emission) {
+			t.Errorf("templates/deployment.yaml emits the API key value (%s) — it must only ever be a mounted file", emission)
+		}
+	}
+	if !strings.Contains(deployment, "--api-key-file=") {
+		t.Error("templates/deployment.yaml must keep passing the key as a file path")
+	}
+}
+
 // TestEphemeralStorageIsBounded: trivy downloads a CVE database measured in hundreds of megabytes
 // into an emptyDir. Without a sizeLimit on the volume and an ephemeral-storage limit on the
 // container, the agent can fill a node's disk and evict its neighbours — a scanner doing that to

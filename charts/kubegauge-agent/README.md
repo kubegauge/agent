@@ -36,7 +36,8 @@ and `existingSecret` do not exist in the published 0.15.0 chart; setting them th
 | `clusterName` | release name | Cluster name shown in the dashboard |
 | `ingestUrl` | — (required) | Base URL of the KubeGauge API (must be `https://`) |
 | `allowInsecureHttp` | `false` | Permit an `http://` ingestUrl — development only, the API key then travels in cleartext |
-| `apiKey` | — (required) | Cluster API key (stored in a chart-managed Secret) |
+| `apiKey` | — (required unless `existingSecret`) | Cluster API key (stored in a chart-managed Secret) |
+| `existingSecret` / `existingSecretKey` | `""` / `api-key` | Use a Secret you manage instead; the chart then never handles the key |
 | `scanInterval` | `1h` | Interval between pushed scans (plan minimums enforced server-side) |
 | `collectTimeout` | `10m` | Budget for one (paginated) collection pass over the API server |
 | `rbac.readConfigMapKeys` | `true` | `list configmaps` for KG-SE-003's key-name heuristic; `false` drops the verb and the check reports N/A |
@@ -56,6 +57,24 @@ and the rest, whose absence only costs the checks that read them. Those failures
 dependent checks report **N/A** instead of a "pass" faked from empty input, and the reason is
 logged. That is what makes trimming a grant (`rbac.readConfigMapKeys=false`) a supported choice
 rather than a broken install.
+
+## Where the API key lives
+
+At runtime the key is only ever a file: mounted from a Secret, read through `--api-key-file`,
+re-read on every request so a rotation takes effect without a restart, never an environment
+variable, never an argument, never logged. `kubectl describe pod` shows nothing.
+
+Getting it there is the part with a trade-off.
+
+- `--set apiKey=kga_...` is the simple path, and the one the dashboard wizard prints. Helm stores
+  the values you pass in the release Secret, so anyone who can read that (or run
+  `helm get values`) can recover the key.
+- `--set existingSecret=my-secret` (chart 0.16.0+) points the agent at a Secret **you** create —
+  from a secrets manager, sealed-secrets, external-secrets, whatever you already run. The chart
+  creates no Secret and the key never passes through Helm. Use `existingSecretKey` if the key
+  inside it is not called `api-key`.
+
+Either way, rotating means updating the Secret; the agent picks it up on its next request.
 
 ## RBAC surface
 

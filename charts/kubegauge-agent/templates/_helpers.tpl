@@ -24,6 +24,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+kubegauge-agent.apiKeySecretName is the Secret the API key is mounted from: one the operator
+manages (existingSecret) or the one this chart creates.
+*/}}
+{{- define "kubegauge-agent.apiKeySecretName" -}}
+{{- default (printf "%s-api-key" (include "kubegauge-agent.fullname" .)) .Values.existingSecret -}}
+{{- end -}}
+
+{{/*
 kubegauge-agent.image resolves the full image reference. Release images are published as
 ghcr.io/kubegauge/agent:v<semver> (WITH the leading "v"), so a bare semver — whether it came from
 Chart.appVersion or from --set image.tag=0.16.0 — is prefixed here rather than turning into an
