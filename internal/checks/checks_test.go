@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubegauge/agent/internal/snapshot"
+	"github.com/kubegauge/agent/internal/wire"
 )
 
 func TestNoDuplicateCheckIDs(t *testing.T) {
@@ -22,6 +23,43 @@ func TestNoDuplicateCheckIDs(t *testing.T) {
 			t.Errorf("duplicate check id in registry: %s", c.ID())
 		}
 		seen[c.ID()] = true
+	}
+}
+
+// TestRunOnlyEmitsSchemaStatuses: the wire schema constrains status to a closed enum, and the
+// platform validates ingest against it. A check inventing a sixth status would not merely fail
+// validation — before the enum existed it reached the dashboard's scoring and turned a whole
+// tenant's report into NaN. This is the producer-side half of that guard.
+func TestRunOnlyEmitsSchemaStatuses(t *testing.T) {
+	allowed := map[string]bool{}
+	for _, s := range wire.CheckStatuses {
+		allowed[s] = true
+	}
+
+	snapshots := map[string]*snapshot.Snapshot{
+		"empty": {},
+		"every optional resource uncollected": {Uncollected: []snapshot.CollectionError{
+			{Resource: "configmaps", Reason: "forbidden"},
+			{Resource: "roles", Reason: "forbidden"},
+			{Resource: "clusterroles", Reason: "forbidden"},
+			{Resource: "rolebindings", Reason: "forbidden"},
+			{Resource: "clusterrolebindings", Reason: "forbidden"},
+			{Resource: "serviceaccounts", Reason: "forbidden"},
+			{Resource: "ingresses", Reason: "forbidden"},
+			{Resource: "resourcequotas", Reason: "forbidden"},
+			{Resource: "limitranges", Reason: "forbidden"},
+			{Resource: "validatingwebhookconfigurations", Reason: "forbidden"},
+		}},
+	}
+
+	for name, snap := range snapshots {
+		t.Run(name, func(t *testing.T) {
+			for _, rc := range Run(snap) {
+				if !allowed[rc.Status] {
+					t.Errorf("%s emitted status %q, which is not in the wire schema's enum %v", rc.ID, rc.Status, wire.CheckStatuses)
+				}
+			}
+		})
 	}
 }
 

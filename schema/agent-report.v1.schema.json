@@ -69,7 +69,14 @@
           "type": "string"
         },
         "status": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "warn",
+            "info",
+            "na"
+          ]
         },
         "namespaces": {
           "items": {

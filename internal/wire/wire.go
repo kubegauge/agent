@@ -40,11 +40,26 @@ type KubernetesInfo struct {
 	NamespaceCount int    `json:"namespaceCount"`
 }
 
+// CheckStatuses is the closed vocabulary of CheckResult.Status, in severity order. It is a closed
+// set on purpose, and enforced at the schema level (see the enum in CheckResult below): a status
+// outside it survives ingest, gets persisted, and reaches the dashboard's scoring, where an
+// unknown key makes the weight lookup undefined and NaN spreads to the overall score, every
+// category score, the gauge and the exported PDF — from one check, for a whole tenant. Rejecting
+// it at the door is the only place that stops.
+//
+// "na" (not applicable / not evaluated, excluded from the score) joined in v0.15.0 for managed
+// control planes, and internal/snapshot now also uses it for checks whose input could not be
+// collected.
+//
+// The enum tag on Status below must list exactly these values, in this order.
+// TestGeneratedSchemaPinsCheckStatusEnum fails if the two ever disagree.
+var CheckStatuses = []string{"pass", "fail", "warn", "info", "na"}
+
 // CheckResult is one check's raw outcome. ImageFindings only appears on scanner-fed checks
 // (KG-SU-003) — same omitempty semantics the old joined contract had.
 type CheckResult struct {
 	ID                string                    `json:"id"`
-	Status            string                    `json:"status"`
+	Status            string                    `json:"status" jsonschema:"enum=pass,enum=fail,enum=warn,enum=info,enum=na"`
 	Namespaces        []string                  `json:"namespaces"`
 	AffectedResources []string                  `json:"affectedResources"`
 	ImageFindings     []report.ImageVulnFinding `json:"imageFindings,omitempty"`
