@@ -1,9 +1,10 @@
 # What leaves your cluster
 
-> **Which version this describes.** This document tracks `main`, which is **ahead of the latest
-> release**. The newest published agent and chart are **v0.15.0**; items marked *from v0.16.0* are
-> merged but not yet released, so they do **not** describe the agent you install today. Where the
-> difference matters for what the agent can read, both states are spelled out below.
+> **Which version this describes.** The newest published agent and chart are **v0.16.1**, and this
+> document describes them. Items marked *from v0.16.0* changed what the agent can read, so they do
+> **not** describe an older agent still running in your cluster — both states are spelled out below.
+> Upgrade straight to v0.16.1: v0.16.0 sized the trivy cache volume below the databases trivy
+> actually downloads, so its pod is evicted in a loop.
 
 The KubeGauge agent is **outbound-only**: it makes only outbound requests and exposes no Service
 and no API. The single listener is a pod-local `GET /healthz` on port 8787 for kubelet probes;

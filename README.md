@@ -32,7 +32,7 @@ A `list`-only ClusterRole over the resource types needed by the checks — pods,
 ResourceQuotas/LimitRanges, NetworkPolicies, Ingresses, RBAC objects, validating webhooks —
 plus `get` for `kube-system/kubeadm-config` only. The agent never writes to the cluster.
 
-**From v0.16.0 (this branch — not yet released), Secrets are not readable by the agent at all**: the
+**From v0.16.0, Secrets are not readable by the agent at all**: the
 ClusterRole grants nothing on them, because RBAC cannot express "list metadata only" and a token
 that can list Secrets cluster-wide is a credential oracle no matter how careful the code is
 (`TestClusterRoleGrantsNoSecretAccess`, `TestSnapshotNeverListsSecrets`). **v0.15.0 and earlier —
