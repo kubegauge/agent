@@ -55,9 +55,18 @@ trivy:
   enabled: true
 
 # Dogfooding: the agent shows up in its own scan; requests/limits are part of passing it.
-# ephemeral-storage is not decoration: trivy downloads its CVE database into the cache volume, so
-# without a limit the pod can fill the node's disk and take its neighbours down with it. Keep it
-# at or above cacheSizeLimit + tmpSizeLimit below.
+#
+# ephemeral-storage is not decoration: trivy downloads databases measured in gigabytes into the two
+# volumes below, so without a bound the pod could fill the node's disk and take its neighbours down
+# with it. Two rules hold this together, both guarded by internal/chart's
+# TestEphemeralStorageLimitClearsBothVolumes:
+#
+#   - the LIMIT stays above cacheSizeLimit + tmpSizeLimit with room to spare, because container
+#     logs are charged to it as well. Chart 0.16.0 set it to exactly the sum (3Gi against 2Gi +
+#     1Gi), which would have evicted the pod in the end even with correctly sized volumes.
+#   - the REQUEST stays small. It is what the scheduler subtracts from a node's allocatable
+#     storage, while the limit is only an eviction threshold and costs nothing at scheduling time,
+#     so the agent keeps fitting on modest nodes.
 resources:
   requests:
     cpu: 100m
@@ -66,13 +75,36 @@ resources:
   limits:
     cpu: "1"
     memory: 1Gi
-    ephemeral-storage: 3Gi
+    ephemeral-storage: 12Gi
 
-# Size limits for the two emptyDir volumes. cache holds the trivy CVE database (the big one, a GB
-# class download) plus the agent's parsed-result cache; tmp is trivy's scratch space. A volume that
-# hits its limit gets the pod evicted instead of silently eating the node's disk.
-cacheSizeLimit: 2Gi
-tmpSizeLimit: 1Gi
+# sizeLimit for the two emptyDir volumes, derived from what trivy 0.72.0 (the version in the agent
+# image) actually stores. Sizes below were read from the published OCI artifacts on 2026-07-30:
+#
+#   cache  = TRIVY_CACHE_DIR plus the agent's own parsed-result cache
+#            - vulnerability database, extracted ..... 1.14 GiB
+#            - Java database, extracted .............. 1.39 GiB, fetched lazily the first time a
+#                                                      scanned image contains a jar/war/ear
+#            - trivy's scan cache and the agent's .... grows with the number of images scanned
+#   tmp    = TMPDIR, where trivy writes each database's COMPRESSED blob before extracting it into
+#            cache (103 MiB for the vulnerability database, 900 MiB for the Java one), plus the
+#            scratch space it uses while unpacking an image, which scales with that image's size
+#
+# So a cluster running anything on the JVM holds about 2.5 GiB resident before a single result is
+# cached, and both databases have grown steadily (the vulnerability download nearly doubled between
+# 2024-10 and 2026-07). These defaults are therefore several times today's footprint on purpose,
+# not a tight fit: they exist to catch runaway growth, not to budget normal operation.
+#
+# The asymmetry is the whole point. Setting these too low costs the agent permanently — the kubelet
+# evicts the pod, the replacement downloads the databases and is evicted again, and the reason
+# appears only in `kubectl describe pod`, never in the agent's logs. Chart 0.16.0 shipped
+# cacheSizeLimit 2Gi, below the two databases together, and did exactly that to every cluster with
+# trivy enabled. Setting them high only delays catching a genuine leak, which the result cache's
+# TTL eviction already bounds on the agent's side.
+#
+# Raise cacheSizeLimit if the agent's "trivy cache on disk" log line gets close to it, and
+# tmpSizeLimit if your images are unusually large. Raise the ephemeral-storage limit above to match.
+cacheSizeLimit: 8Gi
+tmpSizeLimit: 3Gi
 
 # Deny every inbound connection to the agent pod. The agent only ever makes outbound requests, but
 # it does bind 0.0.0.0:8787 for kubelet probes, and without a policy any pod can reach that port.

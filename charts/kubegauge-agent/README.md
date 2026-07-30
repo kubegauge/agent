@@ -21,15 +21,16 @@ helm install kubegauge-agent oci://ghcr.io/kubegauge/charts/kubegauge-agent \
 Install the **published OCI chart**, as above. Installing from a git checkout of `main` works, but
 `main` describes the *next* release: its `appVersion` names an image tag that only exists once that
 release is cut, and its templates assume that agent (the RBAC surface and the image move together).
-For a checkout install between releases, pin an image explicitly with `--set image.tag=v0.15.0` —
+For a checkout install between releases, pin an image explicitly with `--set image.tag=v0.16.0` —
 and read the release notes first, because an older agent may need grants this chart no longer
 creates.
 
 ## Values
 
-This table describes the chart in this checkout (**0.16.0, unreleased**). `collectTimeout`,
-`allowInsecureHttp`, `rbac.readConfigMapKeys`, `cacheSizeLimit`, `tmpSizeLimit`, `networkPolicy`
-and `existingSecret` do not exist in the published 0.15.0 chart; setting them there does nothing.
+This table describes the chart in this checkout (**0.16.1, unreleased**). It is a fix release over
+0.16.0 and changes nothing but the storage sizes: 0.16.0 bounded the two cache volumes below what
+trivy's databases actually need, which put the agent into a permanent eviction loop on every
+cluster with image scanning on. See `cacheSizeLimit` below and the reasoning in `values.yaml`.
 
 | Key | Default | Description |
 |---|---|---|
@@ -43,8 +44,8 @@ and `existingSecret` do not exist in the published 0.15.0 chart; setting them th
 | `rbac.readConfigMapKeys` | `true` | `list configmaps` for KG-SE-003's key-name heuristic; `false` drops the verb and the check reports N/A |
 | `image.repository` / `image.tag` | ghcr / appVersion | Agent image |
 | `trivy.enabled` | `true` | Image vulnerability scanning (KG-SU-003) |
-| `resources` | requests 100m/128Mi/512Mi, limits 1/1Gi/3Gi | Hardened-by-default pod sizing (cpu/memory/ephemeral-storage) |
-| `cacheSizeLimit` / `tmpSizeLimit` | `2Gi` / `1Gi` | `sizeLimit` on the two emptyDir volumes — trivy's CVE database lives in the first |
+| `resources` | requests 100m/128Mi/512Mi, limits 1/1Gi/12Gi | Hardened-by-default pod sizing (cpu/memory/ephemeral-storage). The storage *request* stays small so the pod schedules on modest nodes; the *limit* has to clear `cacheSizeLimit` + `tmpSizeLimit` plus room for logs |
+| `cacheSizeLimit` / `tmpSizeLimit` | `8Gi` / `3Gi` | `sizeLimit` on the two emptyDir volumes. trivy's databases live in the first (1.14 GiB extracted for vulnerabilities, 1.39 GiB more for Java once a jar is scanned); the second takes their compressed downloads and the scratch space for unpacking images |
 | `networkPolicy.enabled` | `false` | Deny all ingress to the agent pod (opt-in: kubelet probes come from the node, and CNIs differ on whether policy applies to them) |
 
 ## Large clusters, and what happens when a read fails
@@ -93,10 +94,11 @@ it can already see — secret volumes, `envFrom`/`secretKeyRef`, `imagePullSecre
 secrets, Ingress TLS — which under-reports namespaces whose Secrets are unused. That is a
 deliberate trade.
 
-**Chart 0.15.0 and earlier still grant it.** Those are the published versions today, so if you
-installed from the OCI chart, your agent's ServiceAccount can list every Secret in the cluster.
-Removing the rule by hand does not work on a v0.15.0 agent — it treats the resulting 403 as fatal
-and every scan fails. Upgrading to 0.16.0 (once released) is the fix.
+**Chart 0.15.0 and earlier still grant it.** If that is what you installed from the OCI chart, your
+agent's ServiceAccount can list every Secret in the cluster. Removing the rule by hand does not
+work on a v0.15.0 agent — it treats the resulting 403 as fatal and every scan fails. Upgrading is
+the fix, and the version to upgrade to is **0.16.1**: 0.16.0 dropped the grant but sized the cache
+volumes below trivy's databases, so its agent is evicted in a loop wherever image scanning is on.
 
 **ConfigMaps are read, key names only.** KG-SE-003 matches ConfigMap KEY NAMES against a
 credential-looking pattern, and no metadata-only projection the API server can serve carries them,

@@ -75,6 +75,12 @@ func main() {
 				firstTrivy = false
 			}
 			snap.ImageVulns = scanner.ScanSnapshot(ctx, snap)
+			// Exceeding the cache volume's sizeLimit gets the pod evicted, and the kubelet records
+			// why as an event nobody reading `kubectl logs` will find. Printing the size every pass
+			// makes the growth visible here first.
+			if used := scanner.CacheBytes(); used > 0 {
+				fmt.Fprintf(os.Stderr, "kubegauge-agent: trivy cache on disk: %d MiB (bounded by the chart's cacheSizeLimit; raise it if the pod is evicted for exceeding an emptyDir limit)\n", used>>20)
+			}
 		}
 		rpt := wire.Build(snap, *clusterName, version, time.Now(), checks.Run(snap), checks.RbacFindings(snap))
 		if len(rpt.Network.Flows) >= report.MaxFlows {

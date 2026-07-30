@@ -123,3 +123,40 @@ func TestNilDiskCacheEvictionIsSafe(t *testing.T) {
 		t.Errorf("a disabled cache evicted %d entries", got)
 	}
 }
+
+// TestCacheBytesCountsBothDirectories: the number the agent logs has to cover trivy's database
+// directory as well as the result cache, because it is the SUM of the two that the emptyDir
+// sizeLimit bounds — and the database is the half that actually grows into it.
+func TestCacheBytesCountsBothDirectories(t *testing.T) {
+	dbDir, resultDir := t.TempDir(), t.TempDir()
+	// A subdirectory too: trivy keeps its database under db/ inside TRIVY_CACHE_DIR.
+	if err := os.MkdirAll(filepath.Join(dbDir, "db"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "db", "trivy.db"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resultDir, "x.json"), make([]byte, 128), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Scanner{dbDir: dbDir, cache: newDiskCache(resultDir)}
+	if got, want := s.CacheBytes(), int64(4096+128); got != want {
+		t.Errorf("CacheBytes() = %d, want %d (database dir plus result cache)", got, want)
+	}
+}
+
+// TestCacheBytesIsZeroWhenUnmeasurable: an unset TRIVY_CACHE_DIR, a disabled result cache or a
+// directory trivy has not created yet must produce a plain 0 rather than an error or a panic. The
+// caller logs nothing in that case instead of printing a misleading "0 MiB".
+func TestCacheBytesIsZeroWhenUnmeasurable(t *testing.T) {
+	empty := &Scanner{}
+	if got := empty.CacheBytes(); got != 0 {
+		t.Errorf("CacheBytes() = %d with no directories at all, want 0", got)
+	}
+
+	missing := &Scanner{dbDir: filepath.Join(t.TempDir(), "not-created-yet"), cache: newDiskCache("")}
+	if got := missing.CacheBytes(); got != 0 {
+		t.Errorf("CacheBytes() = %d for a directory that does not exist, want 0", got)
+	}
+}

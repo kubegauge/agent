@@ -5,7 +5,7 @@ description: Read-only KubeGauge agent — scans your cluster's security posture
 type: application
 # version tracks the release tag with the leading "v" stripped (CI packages the chart as
 # --version ${TAG#v}); appVersion keeps the tag verbatim because that is how the image is
-# published (ghcr.io/kubegauge/agent:v0.16.0). Both are asserted against the tag by CI on release
+# published (ghcr.io/kubegauge/agent:v0.16.1). Both are asserted against the tag by CI on release
 # and against each other by internal/chart's TestChartVersionsAgree.
-version: 0.16.0
-appVersion: "v0.16.0"
+version: 0.16.1
+appVersion: "v0.16.1"

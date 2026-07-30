@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -113,7 +114,10 @@ type runnerFunc func(ctx context.Context, bin string, args ...string) ([]byte, e
 // Scanner wraps the local trivy binary. Construct via NewScanner; a nil *Scanner means "trivy
 // unavailable" and callers must then leave Snapshot.ImageVulns nil (KG-SU-003 reports info).
 type Scanner struct {
-	bin    string
+	bin string
+	// dbDir is trivy's OWN cache directory (TRIVY_CACHE_DIR), where it keeps the vulnerability
+	// database. The agent never writes there; it reads its size for CacheBytes.
+	dbDir  string
 	cache  *diskCache
 	runner runnerFunc
 	now    func() time.Time
@@ -126,7 +130,28 @@ func NewScanner(cacheDir string) *Scanner {
 	if err != nil {
 		return nil
 	}
-	return &Scanner{bin: bin, cache: newDiskCache(cacheDir), runner: defaultRunner, now: time.Now}
+	// The chart points TRIVY_CACHE_DIR at the same volume as cacheDir. Unset (a plain `go run`,
+	// where trivy falls back to its own default under the home directory) simply means CacheBytes
+	// cannot see the database half.
+	return &Scanner{bin: bin, dbDir: os.Getenv("TRIVY_CACHE_DIR"), cache: newDiskCache(cacheDir), runner: defaultRunner, now: time.Now}
+}
+
+// CacheBytes reports what the agent's two on-disk caches occupy right now: trivy's own cache
+// directory (the vulnerability database, by far the larger) plus the parsed-result cache. In the
+// chart both sit on one emptyDir, and exceeding that volume's sizeLimit gets the pod EVICTED with
+// the reason recorded only as a kubelet event — invisible to anyone reading `kubectl logs`. Version
+// 0.16.0 shipped a limit smaller than the database and every agent with trivy enabled died in an
+// eviction loop that looked, from the logs, like a scan that simply stopped. Reporting the number
+// every pass puts the growth in the agent's own output, where it can be seen coming.
+//
+// 0 means nothing was measurable (no TRIVY_CACHE_DIR, result cache disabled, directories not yet
+// created or not readable) — never an assertion that the cache is empty.
+func (s *Scanner) CacheBytes() int64 {
+	total := dirBytes(s.dbDir)
+	if s.cache != nil {
+		total += dirBytes(s.cache.dir)
+	}
+	return total
 }
 
 // ScanSnapshot scans every unique image used by non-system workloads and returns the enrichment

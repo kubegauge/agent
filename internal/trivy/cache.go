@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,28 @@ func (c *diskCache) evictExpired(now time.Time) int {
 		}
 	}
 	return evicted
+}
+
+// dirBytes sums the regular files under dir, recursively. Best-effort by design: a missing or
+// unreadable directory contributes zero instead of raising an error, because the only consumer is
+// an operator-facing log line (Scanner.CacheBytes) that must never be able to fail a scan.
+func dirBytes(dir string) int64 {
+	if dir == "" {
+		return 0
+	}
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	return total
 }
 
 // put is best-effort: a cache write failure must never fail a scan. Directories 0700 / files 0600.

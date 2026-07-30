@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const chartDir = "../../charts/kubegauge-agent"
@@ -105,10 +107,13 @@ func TestApiKeyCanComeFromAnExistingSecret(t *testing.T) {
 	}
 }
 
-// TestEphemeralStorageIsBounded: trivy downloads a CVE database measured in hundreds of megabytes
-// into an emptyDir. Without a sizeLimit on the volume and an ephemeral-storage limit on the
-// container, the agent can fill a node's disk and evict its neighbours — a scanner doing that to
-// the cluster it is auditing is not a good look.
+// TestEphemeralStorageIsBounded: trivy downloads databases measured in gigabytes into an emptyDir
+// (1.14 GiB extracted for the vulnerability database, another 1.39 GiB for the Java one, as
+// published on 2026-07-30). Without a sizeLimit on the volume and an ephemeral-storage limit on
+// the container, the agent can fill a node's disk and evict its neighbours — a scanner doing that
+// to the cluster it is auditing is not a good look. How LARGE those bounds have to be is a
+// separate question, and TestEphemeralStorageLimitClearsBothVolumes below is where it lives:
+// this test passed unchanged while 0.16.0 shipped a cache limit smaller than the databases.
 func TestEphemeralStorageIsBounded(t *testing.T) {
 	deployment := readChartFile(t, "templates/deployment.yaml")
 	if strings.Contains(deployment, "emptyDir: {}") {
@@ -123,6 +128,137 @@ func TestEphemeralStorageIsBounded(t *testing.T) {
 	values := readChartFile(t, "values.yaml")
 	if strings.Count(values, "ephemeral-storage:") < 2 {
 		t.Error("values.yaml must set ephemeral-storage in both requests and limits")
+	}
+}
+
+// scalarAt walks values.yaml as a plain indented mapping and returns the scalar at path
+// ("resources", "limits", "ephemeral-storage"), or ok=false. Enough YAML for a hand-written values
+// file of scalars and nested maps, and no more: block lists, flow maps and anchors are out of
+// scope, which is fine because the keys this file asserts on are none of those.
+func scalarAt(body string, path ...string) (string, bool) {
+	lines := strings.Split(body, "\n")
+	for len(path) > 0 {
+		blockIndent, matched := -1, false
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if blockIndent == -1 {
+				blockIndent = indent // the first key sets the depth of the block being searched
+			}
+			if indent < blockIndent {
+				break // the block ended without the key
+			}
+			if indent > blockIndent {
+				continue // nested under a sibling key
+			}
+			key, value, ok := strings.Cut(trimmed, ":")
+			if !ok || strings.TrimSpace(key) != path[0] {
+				continue
+			}
+			if len(path) == 1 {
+				return strings.Trim(strings.TrimSpace(value), `"'`), true
+			}
+			lines, path, matched = lines[i+1:], path[1:], true // descend into this key's block
+			break
+		}
+		if !matched {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// valuesQuantity reads a Kubernetes quantity ("8Gi") out of values.yaml, failing the test if the
+// key is absent or unparseable — either would silently disable the comparisons below.
+func valuesQuantity(t *testing.T, path ...string) resource.Quantity {
+	t.Helper()
+	raw, ok := scalarAt(readChartFile(t, "values.yaml"), path...)
+	if !ok {
+		t.Fatalf("values.yaml has no %s", strings.Join(path, "."))
+	}
+	q, err := resource.ParseQuantity(raw)
+	if err != nil {
+		t.Fatalf("values.yaml %s = %q is not a quantity: %v", strings.Join(path, "."), raw, err)
+	}
+	return q
+}
+
+// TestScalarAtReadsNestedValues tests the reader, so a values.yaml reshuffle that made it return
+// nothing would fail here rather than quietly turning the guard below into a no-op.
+func TestScalarAtReadsNestedValues(t *testing.T) {
+	const sample = `top: first
+# a comment, and a blank line follow
+
+outer:
+  inner:
+    leaf: 6Gi
+    other: 1
+  sibling: no
+after: last
+`
+	cases := []struct {
+		path []string
+		want string
+		ok   bool
+	}{
+		{[]string{"top"}, "first", true},
+		{[]string{"after"}, "last", true},
+		{[]string{"outer", "inner", "leaf"}, "6Gi", true},
+		{[]string{"outer", "sibling"}, "no", true},
+		{[]string{"outer", "missing"}, "", false},
+		{[]string{"outer", "inner", "top"}, "", false},   // must not escape the block it descended into
+		{[]string{"outer", "inner", "after"}, "", false}, // nor fall through to a shallower key
+		{[]string{"absent"}, "", false},
+	}
+	for _, tc := range cases {
+		got, ok := scalarAt(sample, tc.path...)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("scalarAt(%v) = %q, %v; want %q, %v", tc.path, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// logHeadroom is how much of the ephemeral-storage limit must stay free after both emptyDir
+// volumes are counted. Container logs and the container's writable layer are charged to the same
+// limit, so a limit merely EQUAL to the volumes guarantees eviction eventually — 0.16.0 shipped
+// exactly that (limits 3Gi against cacheSizeLimit 2Gi + tmpSizeLimit 1Gi).
+var logHeadroom = resource.MustParse("1Gi")
+
+// maxStorageRequest keeps requests.ephemeral-storage schedulable. The request is what the
+// scheduler subtracts from a node's allocatable storage; the limit is only an eviction threshold
+// and costs nothing at scheduling time. Raising the limit must never drag the request up with it,
+// or the agent stops fitting on small nodes.
+var maxStorageRequest = resource.MustParse("1Gi")
+
+// TestEphemeralStorageLimitClearsBothVolumes is the guard for the 0.16.0 regression. Two defects
+// shipped together there: cacheSizeLimit (2Gi) was below the databases trivy keeps in that volume,
+// so every agent with trivy enabled entered a permanent eviction loop on first scan; and the
+// ephemeral-storage limit (3Gi) was exactly cacheSizeLimit + tmpSizeLimit, leaving nothing for the
+// logs that count against it, so even correctly sized volumes would have been evicted in the end.
+// The absolute sizes are argued in values.yaml; what is mechanical, and therefore guarded here, is
+// that the outer bound stays above the inner ones with room to spare.
+func TestEphemeralStorageLimitClearsBothVolumes(t *testing.T) {
+	cache := valuesQuantity(t, "cacheSizeLimit")
+	tmp := valuesQuantity(t, "tmpSizeLimit")
+	limit := valuesQuantity(t, "resources", "limits", "ephemeral-storage")
+	request := valuesQuantity(t, "resources", "requests", "ephemeral-storage")
+
+	needed := cache.DeepCopy()
+	needed.Add(tmp)
+	needed.Add(logHeadroom)
+	if limit.Cmp(needed) < 0 {
+		t.Errorf("resources.limits.ephemeral-storage = %s, but cacheSizeLimit (%s) + tmpSizeLimit (%s) + %s of headroom for logs = %s: the pod gets evicted on the pod-level limit even when both volumes stay inside theirs",
+			limit.String(), cache.String(), tmp.String(), logHeadroom.String(), needed.String())
+	}
+	if request.Cmp(maxStorageRequest) > 0 {
+		t.Errorf("resources.requests.ephemeral-storage = %s, above the %s ceiling: the request is reserved at scheduling time, so raising it with the limit stops the agent fitting on small nodes",
+			request.String(), maxStorageRequest.String())
+	}
+	if request.Cmp(limit) > 0 {
+		t.Errorf("resources.requests.ephemeral-storage (%s) exceeds the limit (%s)", request.String(), limit.String())
 	}
 }
 
