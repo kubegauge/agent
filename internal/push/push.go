@@ -31,6 +31,16 @@ const (
 	baseBackoff   = time.Second
 	maxBackoff    = time.Minute
 	clientTimeout = 90 * time.Second
+
+	// onDemandFactor caps how much faster than its configured interval an on-demand scan may make
+	// the agent work. A full scan lists the whole cluster and sweeps every image through trivy, and
+	// the command poll runs every 30s — so without a clamp, an ingest endpoint that answers
+	// {"scan_requested":true} every time (a compromised or spoofed API, a bug) turns the agent into
+	// a permanent load generator against its own API server.
+	onDemandFactor = 12
+	// minOnDemandInterval floors the clamp: with a 24h plan interval, scanEvery/onDemandFactor
+	// alone would make the dashboard's "scan now" button useless for hours.
+	minOnDemandInterval = 5 * time.Minute
 )
 
 // ScanFunc produces a fresh AgentReport (snapshot + checks + trivy) — injected so tests never
@@ -52,6 +62,7 @@ type Runner struct {
 	pending       *wire.AgentReport // freshest unsent report
 	quietUntil    time.Time         // 401 backoff window
 	pushNotBefore time.Time         // 429 Retry-After window
+	lastScanAt    time.Time         // start of the most recent scan, for the on-demand clamp
 }
 
 // Config is the runner's wiring. AllowInsecureHTTP is the only knob with a security meaning — see
@@ -145,6 +156,7 @@ func (r *Runner) key() (string, error) {
 
 func (r *Runner) scanAndPush(ctx context.Context) {
 	start := r.now()
+	r.lastScanAt = start
 	r.logf("scanning cluster")
 	rpt, err := r.scan(ctx)
 	if err != nil {
@@ -253,6 +265,13 @@ func (r *Runner) Poll(ctx context.Context) {
 			ScanRequested bool `json:"scan_requested"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&cmd); err == nil && cmd.ScanRequested {
+			// The payload is a bool: there is no command to interpret, only a rate to bound.
+			if floor := r.onDemandFloor(); r.now().Sub(r.lastScanAt) < floor {
+				r.logf("scan requested by the API, refused: last scan was %s ago and on-demand scans are limited to one per %s; delivering the report already in memory instead",
+					r.now().Sub(r.lastScanAt).Round(time.Second), floor)
+				r.PushPending(ctx)
+				return
+			}
 			r.logf("scan requested by the API — scanning now")
 			r.pushNotBefore = time.Time{} // the request opens the window; don't hold the push back
 			r.scanAndPush(ctx)
@@ -260,6 +279,22 @@ func (r *Runner) Poll(ctx context.Context) {
 	default:
 		r.logf("poll: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// onDemandFloor is the minimum spacing between API-requested scans: fast enough that a human
+// pressing "scan now" gets an answer, slow enough that an endpoint answering scan_requested on
+// every 30s poll cannot make the agent scan continuously.
+func (r *Runner) onDemandFloor() time.Duration {
+	floor := r.scanEvery / onDemandFactor
+	if floor < minOnDemandInterval {
+		floor = minOnDemandInterval
+	}
+	if floor > r.scanEvery {
+		// A deliberately fast scanEvery (dev, or a demo cluster) is its own floor: on-demand scans
+		// must never be slower than the timer that already runs.
+		floor = r.scanEvery
+	}
+	return floor
 }
 
 func gzipJSON(v any) ([]byte, error) {

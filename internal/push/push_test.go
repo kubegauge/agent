@@ -203,6 +203,75 @@ func TestPollTriggersImmediateScanAndPush(t *testing.T) {
 	}
 }
 
+// TestPollRefusesScanFloodButStillDelivers: an ingest endpoint that answers scan_requested on every
+// 30s poll must not be able to make the agent list the whole cluster and sweep every image through
+// trivy forever. The refused request still gets the freshest report the agent already has.
+func TestPollRefusesScanFloodButStillDelivers(t *testing.T) {
+	var scans, ingests atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/agent/commands", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"scan_requested": true}`))
+	})
+	mux.HandleFunc("POST /v1/ingest", func(w http.ResponseWriter, _ *http.Request) {
+		ingests.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	r := newTestRunner(t, srv.URL)
+	r.scan = func(context.Context) (*wire.AgentReport, error) {
+		scans.Add(1)
+		return testReport(), nil
+	}
+	var logs []string
+	r.logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+
+	for i := 0; i < 10; i++ {
+		r.Poll(context.Background())
+	}
+
+	if scans.Load() != 1 {
+		t.Errorf("10 scan requests in a row produced %d scans, want 1 (the rest clamped)", scans.Load())
+	}
+	if ingests.Load() != 1 {
+		t.Errorf("only the accepted scan should have pushed (%d ingests)", ingests.Load())
+	}
+	if !strings.Contains(strings.Join(logs, "\n"), "refused") {
+		t.Errorf("a refused on-demand scan must say so; logs:\n%s", strings.Join(logs, "\n"))
+	}
+
+	// A refusal is not a dead end: whatever the agent already holds still goes out.
+	r.pending = testReport()
+	r.Poll(context.Background())
+	if scans.Load() != 1 {
+		t.Errorf("the clamp leaked: %d scans", scans.Load())
+	}
+	if ingests.Load() != 2 {
+		t.Errorf("a refused request must still deliver the pending report (%d ingests)", ingests.Load())
+	}
+}
+
+// TestOnDemandFloor pins the clamp: a small factor of the configured interval, floored so the
+// dashboard button still works on a 24h plan, and never slower than the timer itself.
+func TestOnDemandFloor(t *testing.T) {
+	tests := []struct {
+		scanEvery time.Duration
+		want      time.Duration
+	}{
+		{scanEvery: time.Hour, want: 5 * time.Minute},
+		{scanEvery: 24 * time.Hour, want: 2 * time.Hour},
+		{scanEvery: time.Minute, want: time.Minute},
+	}
+	for _, tt := range tests {
+		r := &Runner{scanEvery: tt.scanEvery}
+		if got := r.onDemandFloor(); got != tt.want {
+			t.Errorf("scanEvery %s: floor = %s, want %s", tt.scanEvery, got, tt.want)
+		}
+	}
+}
+
 func TestPollIdleDeliversPendingReport(t *testing.T) {
 	var ingests atomic.Int32
 	mux := http.NewServeMux()
