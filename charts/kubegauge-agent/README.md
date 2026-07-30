@@ -37,7 +37,8 @@ creates.
 | `rbac.readConfigMapKeys` | `true` | `list configmaps` for KG-SE-003's key-name heuristic; `false` drops the verb and the check reports N/A |
 | `image.repository` / `image.tag` | ghcr / appVersion | Agent image |
 | `trivy.enabled` | `true` | Image vulnerability scanning (KG-SU-003) |
-| `resources` | requests 100m/128Mi, limits 1/1Gi | Hardened-by-default pod sizing |
+| `resources` | requests 100m/128Mi/512Mi, limits 1/1Gi/3Gi | Hardened-by-default pod sizing (cpu/memory/ephemeral-storage) |
+| `cacheSizeLimit` / `tmpSizeLimit` | `2Gi` / `1Gi` | `sizeLimit` on the two emptyDir volumes — trivy's CVE database lives in the first |
 
 ## Large clusters, and what happens when a read fails
 

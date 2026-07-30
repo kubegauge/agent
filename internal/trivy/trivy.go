@@ -136,6 +136,10 @@ func (s *Scanner) ScanSnapshot(ctx context.Context, snap *snapshot.Snapshot) *sn
 	ctx, cancel := context.WithTimeout(ctx, totalBudget)
 	defer cancel()
 
+	// Reclaim the entries whose TTL has passed before writing new ones: the cache lives on an
+	// emptyDir, and images come and go.
+	s.cache.evictExpired(s.now())
+
 	digests := imageDigests(snap)
 	out := &snapshot.ImageVulns{ByRef: map[string]snapshot.ImageScanResult{}}
 	for _, ref := range collectImageRefs(snap) {

@@ -76,3 +76,50 @@ func TestNilDiskCacheIsSafe(t *testing.T) {
 		t.Error("a nil cache never hits")
 	}
 }
+
+// TestDiskCacheEvictsExpiredEntries: the TTL used to be read-side only, so a cache file for an
+// image that left the cluster stayed on disk forever — on an emptyDir, that is a slow leak.
+func TestDiskCacheEvictsExpiredEntries(t *testing.T) {
+	dir := t.TempDir()
+	c := newDiskCache(dir)
+	c.put("gone", sampleResult(), cacheNow)
+	c.put("fresh", sampleResult(), cacheNow.Add(cacheTTL))
+
+	if evicted := c.evictExpired(cacheNow.Add(cacheTTL + time.Minute)); evicted != 1 {
+		t.Errorf("evicted %d entries, want 1", evicted)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("cache holds %d files after eviction, want 1", len(entries))
+	}
+	if _, ok := c.get("fresh", cacheNow.Add(cacheTTL+time.Minute)); !ok {
+		t.Error("eviction removed an entry that was still within its TTL")
+	}
+}
+
+// TestDiskCacheEvictsUnparseableEntries: a corrupt file can never be read again, and only its own
+// key would ever overwrite it.
+func TestDiskCacheEvictsUnparseableEntries(t *testing.T) {
+	dir := t.TempDir()
+	c := newDiskCache(dir)
+	c.put("k", sampleResult(), cacheNow)
+	entries, _ := os.ReadDir(dir)
+	if err := os.WriteFile(filepath.Join(dir, entries[0].Name()), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if evicted := c.evictExpired(cacheNow); evicted != 1 {
+		t.Errorf("evicted %d entries, want the corrupt one gone", evicted)
+	}
+}
+
+func TestNilDiskCacheEvictionIsSafe(t *testing.T) {
+	var c *diskCache
+	if got := c.evictExpired(cacheNow); got != 0 {
+		t.Errorf("a disabled cache evicted %d entries", got)
+	}
+}

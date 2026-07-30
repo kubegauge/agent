@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kubegauge/agent/internal/snapshot"
@@ -67,6 +68,43 @@ func (c *diskCache) get(key string, now time.Time) (snapshot.ImageScanResult, bo
 		return snapshot.ImageScanResult{}, false
 	}
 	return e.Result, true
+}
+
+// evictExpired deletes entries past the TTL and returns how many went. The TTL used to be
+// read-side only: an image that left the cluster left its cache file behind forever, so the
+// directory grew without bound on an emptyDir with no size limit. Called once per scan pass, it
+// reads one small file per entry — the same files the pass is about to read anyway.
+//
+// Best-effort throughout: an unreadable directory or a failed unlink must never fail a scan.
+func (c *diskCache) evictExpired(now time.Time) int {
+	if c == nil {
+		return 0
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return 0
+	}
+	evicted := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(c.dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var e cacheEntry
+		// A file that no longer parses is dead weight too: get treats it as a miss and put will
+		// never overwrite it unless that exact key comes back.
+		if err := json.Unmarshal(data, &e); err == nil && now.Sub(e.StoredAt) <= cacheTTL {
+			continue
+		}
+		if os.Remove(path) == nil {
+			evicted++
+		}
+	}
+	return evicted
 }
 
 // put is best-effort: a cache write failure must never fail a scan. Directories 0700 / files 0600.

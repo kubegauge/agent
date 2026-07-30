@@ -43,13 +43,24 @@ trivy:
   enabled: true
 
 # Dogfooding: the agent shows up in its own scan; requests/limits are part of passing it.
+# ephemeral-storage is not decoration: trivy downloads its CVE database into the cache volume, so
+# without a limit the pod can fill the node's disk and take its neighbours down with it. Keep it
+# at or above cacheSizeLimit + tmpSizeLimit below.
 resources:
   requests:
     cpu: 100m
     memory: 128Mi
+    ephemeral-storage: 512Mi
   limits:
     cpu: "1"
     memory: 1Gi
+    ephemeral-storage: 3Gi
+
+# Size limits for the two emptyDir volumes. cache holds the trivy CVE database (the big one, a GB
+# class download) plus the agent's parsed-result cache; tmp is trivy's scratch space. A volume that
+# hits its limit gets the pod evicted instead of silently eating the node's disk.
+cacheSizeLimit: 2Gi
+tmpSizeLimit: 1Gi
 
 nodeSelector: {}
 tolerations: []

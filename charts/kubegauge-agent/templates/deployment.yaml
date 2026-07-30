@@ -84,9 +84,11 @@ spec:
           secret:
             secretName: {{ include "kubegauge-agent.fullname" . }}-api-key
         - name: cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.cacheSizeLimit }}
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.tmpSizeLimit }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

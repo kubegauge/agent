@@ -76,6 +76,27 @@ func TestDeploymentResolvesImageThroughHelper(t *testing.T) {
 	}
 }
 
+// TestEphemeralStorageIsBounded: trivy downloads a CVE database measured in hundreds of megabytes
+// into an emptyDir. Without a sizeLimit on the volume and an ephemeral-storage limit on the
+// container, the agent can fill a node's disk and evict its neighbours — a scanner doing that to
+// the cluster it is auditing is not a good look.
+func TestEphemeralStorageIsBounded(t *testing.T) {
+	deployment := readChartFile(t, "templates/deployment.yaml")
+	if strings.Contains(deployment, "emptyDir: {}") {
+		t.Error("templates/deployment.yaml has an emptyDir with no sizeLimit")
+	}
+	for _, want := range []string{"sizeLimit: {{ .Values.cacheSizeLimit }}", "sizeLimit: {{ .Values.tmpSizeLimit }}"} {
+		if !strings.Contains(deployment, want) {
+			t.Errorf("templates/deployment.yaml is missing %q", want)
+		}
+	}
+
+	values := readChartFile(t, "values.yaml")
+	if strings.Count(values, "ephemeral-storage:") < 2 {
+		t.Error("values.yaml must set ephemeral-storage in both requests and limits")
+	}
+}
+
 // TestClusterRoleGrantsNoSecretAccess is the chart-side half of the guarantee
 // internal/snapshot.TestSnapshotNeverListsSecrets makes in code: Kubernetes RBAC cannot express
 // "list metadata only", so the only way the agent's ServiceAccount token stops being a
