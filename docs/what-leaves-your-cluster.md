@@ -1,9 +1,16 @@
 # What leaves your cluster
 
-The KubeGauge agent is **outbound-only**: it accepts no inbound connections (no Service, no
-exposed API — only a pod-local `GET /healthz` for kubelet probes) and sends exactly ONE kind of
-payload to exactly ONE destination: an `AgentReport` to the `ingestUrl` you configure,
-authenticated by your cluster's API key over TLS.
+> **Which version this describes.** This document tracks `main`, which is **ahead of the latest
+> release**. The newest published agent and chart are **v0.15.0**; items marked *from v0.16.0* are
+> merged but not yet released, so they do **not** describe the agent you install today. Where the
+> difference matters for what the agent can read, both states are spelled out below.
+
+The KubeGauge agent is **outbound-only**: it makes only outbound requests and exposes no Service
+and no API. The single listener is a pod-local `GET /healthz` on port 8787 for kubelet probes;
+it is reachable from inside the cluster like any other pod port, and the chart ships an optional
+NetworkPolicy (from v0.16.0) to close even that. It sends exactly ONE kind of payload to exactly
+ONE destination: an `AgentReport` to the `ingestUrl` you configure, authenticated by your cluster's
+API key over TLS.
 
 The payload is formalized by [`schema/agent-report.v1.schema.json`](../schema/agent-report.v1.schema.json),
 **generated from the Go structs** in [`internal/wire`](../internal/wire) — the schema cannot drift
@@ -25,9 +32,17 @@ from the code (test-enforced). This document is the human-readable tour of every
 
 ## What NEVER leaves
 
-- **Anything about your Secrets — including their names.** The agent has no RBAC grant on Secrets
-  at all, so it cannot read one even by accident (`TestSnapshotNeverListsSecrets`,
-  `TestClusterRoleGrantsNoSecretAccess`).
+- **Secret VALUES**, in every version. Nothing a Secret contains has ever been kept, serialized or
+  logged.
+- **Anything about your Secrets at all, including their names — *from v0.16.0*.** That version
+  removes `secrets` from the ClusterRole entirely, so the agent cannot read one even by accident
+  (`TestSnapshotNeverListsSecrets`, `TestClusterRoleGrantsNoSecretAccess`).
+  **In v0.15.0 and earlier — which is what you install today — the ClusterRole DOES grant `list` on
+  `secrets` cluster-wide.** Those versions list Secrets and keep only name/namespace/type in
+  memory, never sending them; but the grant exists, so the agent's ServiceAccount token can read
+  every Secret in the cluster, and anyone who reaches that token can too. If that matters to you,
+  wait for v0.16.0, or remove `secrets` from the ClusterRole yourself — on v0.15.0 that makes every
+  scan fail (the collector treats the 403 as fatal), which is itself fixed in v0.16.0.
 - **ConfigMap VALUES.** ConfigMaps are listed for their KEY NAMES only (KG-SE-003's credential
   heuristic); values are discarded in the same loop that lists them, enforced by
   `TestConfigMapValuesNeverLeaveSnapshot` in `internal/snapshot` — the test fails the build if a
@@ -55,6 +70,8 @@ from the code (test-enforced). This document is the human-readable tour of every
 
 ## Verify it yourself
 
-The read surface is a `list`-only ClusterRole (plus `get` on `kube-system/kubeadm-config`), with no
-`secrets` entry anywhere in it: `helm template` the chart and read `rbac.yaml`. Then read `internal/snapshot` (what is collected),
+The read surface is a `list`-only ClusterRole (plus `get` on `kube-system/kubeadm-config`) — with no
+`secrets` entry anywhere in it from v0.16.0, and with one in v0.15.0 and earlier. Do not take this
+document's word for it: `helm template` **the chart version you are installing** and read
+`rbac.yaml`. Then read `internal/snapshot` (what is collected),
 `internal/checks` (what is computed) and `internal/wire` (what is sent). That's the whole pipeline.

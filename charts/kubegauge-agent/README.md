@@ -26,6 +26,10 @@ creates.
 
 ## Values
 
+This table describes the chart in this checkout (**0.16.0, unreleased**). `collectTimeout`,
+`allowInsecureHttp`, `rbac.readConfigMapKeys`, `cacheSizeLimit`, `tmpSizeLimit`, `networkPolicy`
+and `existingSecret` do not exist in the published 0.15.0 chart; setting them there does nothing.
+
 | Key | Default | Description |
 |---|---|---|
 | `clusterName` | release name | Cluster name shown in the dashboard |
@@ -58,14 +62,20 @@ ServiceAccounts, Services, Namespaces, Nodes, quotas, NetworkPolicies, Ingresses
 validating webhooks) plus `get` on `kube-system/kubeadm-config` only. The agent never writes to
 your cluster.
 
-**Secrets are not in it at all.** Kubernetes RBAC has no "list metadata only" verb, so a
-`list secrets` grant would make the agent's ServiceAccount token a cluster-wide credential oracle
-for anyone who reached the pod — regardless of what the agent's own code does with the response.
-That grant is the exact pattern KG-RB-006 fails a Role for, so the scanner does not ship it
-(`TestClusterRoleGrantsNoSecretAccess`, `TestSnapshotNeverListsSecrets`). The one check that needed
-to know which namespaces hold Secrets (KG-RB-004) now infers it from references it can already see
-— secret volumes, `envFrom`/`secretKeyRef`, `imagePullSecrets`, ServiceAccount secrets, Ingress TLS
-— which under-reports namespaces whose Secrets are unused. That is a deliberate trade.
+**Secrets are not in it at all — from chart 0.16.0.** Kubernetes RBAC has no "list metadata only"
+verb, so a `list secrets` grant would make the agent's ServiceAccount token a cluster-wide
+credential oracle for anyone who reached the pod — regardless of what the agent's own code does
+with the response. That grant is the exact pattern KG-RB-006 fails a Role for, so the scanner no
+longer ships it (`TestClusterRoleGrantsNoSecretAccess`, `TestSnapshotNeverListsSecrets`). The one
+check that needed to know which namespaces hold Secrets (KG-RB-004) now infers it from references
+it can already see — secret volumes, `envFrom`/`secretKeyRef`, `imagePullSecrets`, ServiceAccount
+secrets, Ingress TLS — which under-reports namespaces whose Secrets are unused. That is a
+deliberate trade.
+
+**Chart 0.15.0 and earlier still grant it.** Those are the published versions today, so if you
+installed from the OCI chart, your agent's ServiceAccount can list every Secret in the cluster.
+Removing the rule by hand does not work on a v0.15.0 agent — it treats the resulting 403 as fatal
+and every scan fails. Upgrading to 0.16.0 (once released) is the fix.
 
 **ConfigMaps are read, key names only.** KG-SE-003 matches ConfigMap KEY NAMES against a
 credential-looking pattern, and no metadata-only projection the API server can serve carries them,
@@ -78,3 +88,8 @@ The agent's namespace intentionally shows up in its own report (dogfooding): Net
 coverage (KG-NP-*) and missing ResourceQuota/LimitRange (KG-QT-*) against the release namespace.
 If your cluster grants anyone `create pods` in that namespace, expect KG-RB-004 to warn about it
 too: the release namespace holds the API-key Secret the agent mounts.
+
+**On chart 0.15.0 and earlier, KG-RB-006 fails on the agent's own ClusterRole** — it grants `list`
+on `secrets`, which is exactly what that check looks for. That self-finding is correct and the
+scanner earned it; chart 0.16.0 removes the grant instead of exempting the agent from its own
+check, and no version has ever exempted it.

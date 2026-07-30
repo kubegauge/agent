@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubegauge/agent/internal/wire"
@@ -41,6 +42,13 @@ const (
 	// minOnDemandInterval floors the clamp: with a 24h plan interval, scanEvery/onDemandFactor
 	// alone would make the dashboard's "scan now" button useless for hours.
 	minOnDemandInterval = 5 * time.Minute
+
+	// defaultLivenessTimeout is how long the outbound loop may go without completing an iteration
+	// before /healthz starts failing and the kubelet restarts the pod. One iteration can
+	// legitimately take a long time — a collection pass over a big cluster, a first trivy run that
+	// downloads the CVE database, a push with retries — so this is comfortably longer than all of
+	// that together, and still shorter than a default scan interval.
+	defaultLivenessTimeout = 30 * time.Minute
 )
 
 // ScanFunc produces a fresh AgentReport (snapshot + checks + trivy) — injected so tests never
@@ -63,6 +71,52 @@ type Runner struct {
 	quietUntil    time.Time         // 401 backoff window
 	pushNotBefore time.Time         // 429 Retry-After window
 	lastScanAt    time.Time         // start of the most recent scan, for the on-demand clamp
+
+	health *health
+}
+
+// health is what /healthz answers from. It is written by the single Run goroutine and read by the
+// probe server, hence the mutex.
+//
+// Liveness means "the outbound loop is still turning", not "the last push succeeded": an
+// unreachable API or a revoked key are conditions a restart cannot fix, and the whole design is
+// built to sit quietly through them rather than crash-loop. What a restart CAN fix is a wedge — a
+// goroutine stuck inside a scan or a push — and that is exactly what a loop iteration failing to
+// complete within the limit detects. The last successful scan and push are reported in the body
+// for the operator, without gating the verdict.
+type health struct {
+	mu     sync.Mutex
+	limit  time.Duration
+	now    func() time.Time
+	loopAt time.Time
+	scanAt time.Time
+	pushAt time.Time
+}
+
+func (h *health) mark(field *time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	*field = h.now()
+}
+
+// Alive reports whether the outbound loop completed an iteration recently enough, plus a one-line
+// summary for the probe body.
+func (r *Runner) Alive() (bool, string) {
+	h := r.health
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	since := h.now().Sub(h.loopAt)
+	summary := fmt.Sprintf("loop %s ago, last scan %s, last delivered report %s (liveness limit %s)",
+		since.Round(time.Second), agoOrNever(h.now(), h.scanAt), agoOrNever(h.now(), h.pushAt), h.limit)
+	return since < h.limit, summary
+}
+
+func agoOrNever(now, at time.Time) string {
+	if at.IsZero() {
+		return "never"
+	}
+	return now.Sub(at).Round(time.Second).String() + " ago"
 }
 
 // Config is the runner's wiring. AllowInsecureHTTP is the only knob with a security meaning — see
@@ -79,6 +133,10 @@ type Config struct {
 	// (make agent-dev, pushing to http://host.docker.internal:8080) is the reason the escape hatch
 	// exists at all; it must never be the default.
 	AllowInsecureHTTP bool
+	// LivenessTimeout overrides how long the loop may go without completing an iteration before
+	// /healthz fails. Zero means defaultLivenessTimeout; it must stay comfortably above the
+	// collection budget, or a slow scan looks like a wedge.
+	LivenessTimeout time.Duration
 }
 
 // ValidateIngestURL rejects an ingest URL the agent must not send its API key to. Called by New so
@@ -109,7 +167,12 @@ func New(cfg Config, scan ScanFunc) (*Runner, error) {
 	if err := ValidateIngestURL(cfg.IngestURL, cfg.AllowInsecureHTTP); err != nil {
 		return nil, err
 	}
+	limit := cfg.LivenessTimeout
+	if limit <= 0 {
+		limit = defaultLivenessTimeout
+	}
 	return &Runner{
+		health:    &health{limit: limit, now: time.Now, loopAt: time.Now()},
 		ingestURL: strings.TrimRight(cfg.IngestURL, "/"),
 		keyFile:   cfg.KeyFile,
 		version:   cfg.Version,
@@ -125,9 +188,11 @@ func New(cfg Config, scan ScanFunc) (*Runner, error) {
 	}, nil
 }
 
-// Run blocks until ctx is done: one scan+push at startup, then the two tickers.
+// Run blocks until ctx is done: one scan+push at startup, then the two tickers. Every completed
+// iteration marks the loop alive — see health.
 func (r *Runner) Run(ctx context.Context) {
 	r.scanAndPush(ctx)
+	r.health.mark(&r.health.loopAt)
 	scanTick := time.NewTicker(r.scanEvery)
 	pollTick := time.NewTicker(r.pollEvery)
 	defer scanTick.Stop()
@@ -141,6 +206,7 @@ func (r *Runner) Run(ctx context.Context) {
 		case <-pollTick.C:
 			r.Poll(ctx)
 		}
+		r.health.mark(&r.health.loopAt)
 	}
 }
 
@@ -164,6 +230,7 @@ func (r *Runner) scanAndPush(ctx context.Context) {
 		return
 	}
 	r.pending = rpt
+	r.health.mark(&r.health.scanAt)
 	r.logf("scan complete in %s (%d checks)", r.now().Sub(start).Round(time.Second), len(rpt.Checks))
 	r.PushPending(ctx)
 }
@@ -187,6 +254,7 @@ func (r *Runner) PushPending(ctx context.Context) {
 		case err == nil && (status == http.StatusAccepted || status == http.StatusOK):
 			r.logf("report delivered")
 			r.pending = nil
+			r.health.mark(&r.health.pushAt)
 			return
 		case isAuthFailure(status):
 			r.quietUntil = r.now().Add(authBackoff)

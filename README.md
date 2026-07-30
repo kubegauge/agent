@@ -29,13 +29,18 @@ A `list`-only ClusterRole over the resource types needed by the checks — pods,
 ResourceQuotas/LimitRanges, NetworkPolicies, Ingresses, RBAC objects, validating webhooks —
 plus `get` for `kube-system/kubeadm-config` only. The agent never writes to the cluster.
 
-**Secrets are not readable by the agent at all**: the ClusterRole grants nothing on them, because
-RBAC cannot express "list metadata only" and a token that can list Secrets cluster-wide is a
-credential oracle no matter how careful the code is (`TestClusterRoleGrantsNoSecretAccess`,
-`TestSnapshotNeverListsSecrets`). **ConfigMaps are read for their KEY NAMES only** — the input to
-KG-SE-003's credential heuristic — and values never survive collection
-(`TestConfigMapValuesNeverLeaveSnapshot`). See [the chart README](charts/kubegauge-agent/README.md#rbac-surface)
-for the trade this makes in KG-RB-004.
+**From v0.16.0 (this branch — not yet released), Secrets are not readable by the agent at all**: the
+ClusterRole grants nothing on them, because RBAC cannot express "list metadata only" and a token
+that can list Secrets cluster-wide is a credential oracle no matter how careful the code is
+(`TestClusterRoleGrantsNoSecretAccess`, `TestSnapshotNeverListsSecrets`). **v0.15.0 and earlier —
+the versions published today — still grant `list` on `secrets` cluster-wide**; they keep only
+name/namespace/type and never send it, but the grant is real. See
+[docs/what-leaves-your-cluster.md](docs/what-leaves-your-cluster.md) for what that means for you.
+
+**ConfigMaps are read for their KEY NAMES only** — the input to KG-SE-003's credential heuristic —
+and values never survive collection (`TestConfigMapValuesNeverLeaveSnapshot`). See
+[the chart README](charts/kubegauge-agent/README.md#rbac-surface) for the trade v0.16.0 makes in
+KG-RB-004.
 
 ## Development
 
