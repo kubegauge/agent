@@ -188,9 +188,15 @@ func (r *Runner) PushPending(ctx context.Context) {
 			r.logf("report delivered")
 			r.pending = nil
 			return
-		case status == http.StatusUnauthorized:
+		case isAuthFailure(status):
 			r.quietUntil = r.now().Add(authBackoff)
-			r.logf("push rejected (401 — key revoked or unknown); quiet for %s, no crash-loop", authBackoff)
+			r.logf("push rejected (%d — key revoked, unknown or not allowed here); quiet for %s, no crash-loop", status, authBackoff)
+			return
+		case status == http.StatusRequestEntityTooLarge:
+			// Retrying cannot help: the same bytes will be too large next time. Drop the report so
+			// the next scan starts clean instead of hammering the API with a doomed payload.
+			r.pending = nil
+			r.logf("push rejected (413 — report too large for the API); dropped, the next scan produces a fresh one")
 			return
 		case status == http.StatusTooManyRequests:
 			r.pushNotBefore = r.now().Add(retryAfter)
@@ -254,13 +260,13 @@ func (r *Runner) Poll(ctx context.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusNoContent:
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
 		r.PushPending(ctx)
-	case http.StatusUnauthorized:
+	case isAuthFailure(resp.StatusCode):
 		r.quietUntil = r.now().Add(authBackoff)
-		r.logf("poll rejected (401); quiet for %s", authBackoff)
-	case http.StatusOK:
+		r.logf("poll rejected (%d); quiet for %s", resp.StatusCode, authBackoff)
+	case resp.StatusCode == http.StatusOK:
 		var cmd struct {
 			ScanRequested bool `json:"scan_requested"`
 		}
@@ -279,6 +285,14 @@ func (r *Runner) Poll(ctx context.Context) {
 	default:
 		r.logf("poll: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// isAuthFailure covers both ways the API can say "this key is not getting in": 401 for unknown or
+// revoked, 403 for known but not allowed here. They are the same situation for the agent — nothing
+// it can retry its way out of — so 403 gets 401's quiet window instead of falling through to the
+// generic retry path, where a revoked key produced a noisy loop forever.
+func isAuthFailure(status int) bool {
+	return status == http.StatusUnauthorized || status == http.StatusForbidden
 }
 
 // onDemandFloor is the minimum spacing between API-requested scans: fast enough that a human

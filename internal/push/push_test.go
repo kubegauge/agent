@@ -161,6 +161,57 @@ func TestPush401EntersQuietPeriodWithoutCrash(t *testing.T) {
 	}
 }
 
+// TestPush403IsQuietLikeA401: a key that is known but no longer allowed used to fall through to
+// the generic retry path — five attempts with backoff, every scan interval, forever, with a log
+// line each time. There is nothing to retry.
+func TestPush403IsQuietLikeA401(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	r := newTestRunner(t, srv.URL)
+	r.scanAndPush(context.Background())
+
+	if calls.Load() != 1 {
+		t.Fatalf("403 must not retry (got %d calls)", calls.Load())
+	}
+	if r.pending == nil {
+		t.Error("the report must be kept for resend once access is restored")
+	}
+	if !r.quietUntil.After(r.now()) {
+		t.Error("403 must open a quiet window")
+	}
+
+	r.Poll(context.Background()) // inside the quiet window: no new request
+	if calls.Load() != 1 {
+		t.Fatalf("polling during the 403 quiet window made a request (%d calls)", calls.Load())
+	}
+}
+
+// TestPush413DropsTheReport: the same bytes will be too large on every retry, so the only useful
+// answer is to stop carrying them.
+func TestPush413DropsTheReport(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+	}))
+	defer srv.Close()
+
+	r := newTestRunner(t, srv.URL)
+	r.scanAndPush(context.Background())
+
+	if calls.Load() != 1 {
+		t.Fatalf("413 must not retry (got %d calls)", calls.Load())
+	}
+	if r.pending != nil {
+		t.Error("a report the API will never accept must not be kept for resend")
+	}
+}
+
 func TestPush429HonorsRetryAfter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "120")
