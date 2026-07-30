@@ -27,7 +27,7 @@ from the code (test-enforced). This document is the human-readable tour of every
 | `checks[]` | Per check id: `status` (pass/fail/warn/info/na — `na` means the check was not applicable or could not be evaluated, and it is excluded from the score), affected `namespaces`, `affectedResources` (kind/namespace/name strings), and for the image-scan check `imageFindings` (image refs + CVE counts + top CVE ids) | `{"id":"KG-NP-001","status":"fail","namespaces":["apps"],...}` |
 | `namespaces[]` | Name, PSA labels, pod count, default-deny flags | `{"name":"apps","psaEnforce":null,...}` |
 | `workloads[]` | Workload identity (kind/namespace/name) + security posture booleans (runAsNonRoot, seccomp, etc.) | — |
-| `rbacFindings[]` | Risky bindings: subject, binding, role names + reason | — |
+| `rbacFindings[]` | Risky bindings: subject, binding, role names + reason, plus the binding's `namespace` for a RoleBinding (absent for a cluster-scoped ClusterRoleBinding) | — |
 | `network` | The NetworkPolicy evaluation graph: workload/service nodes and allowed/denied flows with the policy name responsible | — |
 
 ## What NEVER leaves

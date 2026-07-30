@@ -65,9 +65,18 @@ type RbacFinding struct {
 	SubjectKind string `json:"subjectKind"`
 	Binding     string `json:"binding"`
 	BindingKind string `json:"bindingKind"`
-	Role        string `json:"role"`
-	Risk        string `json:"risk"`
-	Reason      string `json:"reason"`
+	// Namespace is the RoleBinding's own namespace: the boundary its grant stops at, and what the
+	// dashboard's namespace filter matches against. Empty for a ClusterRoleBinding, which is
+	// cluster-scoped and lives in no namespace at all — filling one in would let a cluster-wide
+	// grant disappear behind a namespace filter, which is the opposite of what this field is for.
+	//
+	// Optional on the wire (omitempty), so an API deployed before this field existed keeps
+	// validating reports from agents that send it, and so a report from an older agent stays valid
+	// once the API knows it.
+	Namespace string `json:"namespace,omitempty"`
+	Role      string `json:"role"`
+	Risk      string `json:"risk"`
+	Reason    string `json:"reason"`
 }
 
 // NamespaceInfo mirrors the TS NamespaceInfo interface.

@@ -356,6 +356,9 @@
         "bindingKind": {
           "type": "string"
         },
+        "namespace": {
+          "type": "string"
+        },
         "role": {
           "type": "string"
         },

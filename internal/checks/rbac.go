@@ -658,6 +658,11 @@ func riskyRoleReason(key string, wildcard, secrets map[string]bool) (reason stri
 // not a role grant — so it is represented only in checks[] (KG-RB-003), never duplicated into
 // rbacFindings.
 //
+// Findings from a RoleBinding carry that binding's Namespace; findings from a ClusterRoleBinding
+// carry none, because a cluster-scoped object has none. The consumer reads the difference as
+// "confined to one namespace" vs "cluster-wide", so an empty Namespace here has to keep meaning
+// exactly the second thing.
+//
 // Findings are sorted by (bindingKind, binding, subject) before sequential ids are assigned, so
 // RB-F-NNN numbering is deterministic regardless of the snapshot's internal slice order.
 //
@@ -729,9 +734,15 @@ func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
 					SubjectKind: subj.Kind,
 					Binding:     rb.Name,
 					BindingKind: "RoleBinding",
-					Role:        rb.RoleRef.Name,
-					Risk:        risk,
-					Reason:      reason,
+					// The BINDING's namespace, which is the boundary of the grant. It happens to
+					// equal the Role's namespace whenever roleRef.Kind is "Role" (Kubernetes
+					// resolves a namespaced roleRef inside the binding's own namespace), but a
+					// RoleBinding may also point at a ClusterRole, and then the role has no
+					// namespace to borrow. Only the binding's is always the right answer.
+					Namespace: rb.Namespace,
+					Role:      rb.RoleRef.Name,
+					Risk:      risk,
+					Reason:    reason,
 				})
 			}
 		}

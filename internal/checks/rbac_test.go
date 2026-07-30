@@ -352,6 +352,49 @@ func TestRbacFindings(t *testing.T) {
 		if got[0].Risk != "high" || got[0].Role != "grafana" || got[0].BindingKind != "RoleBinding" {
 			t.Errorf("unexpected finding: %+v", got[0])
 		}
+		if got[0].Namespace != "monitoring" {
+			t.Errorf("Namespace = %q, want monitoring — a RoleBinding finding without it cannot be filtered by namespace downstream", got[0].Namespace)
+		}
+	})
+
+	// A RoleBinding may point at a ClusterRole, and then there is no role namespace to fall back
+	// on. The binding's own namespace is still the boundary of the grant, and still what must be
+	// reported.
+	t.Run("a RoleBinding pointing at a ClusterRole still carries the binding's namespace", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			ClusterRoles: []rbacv1.ClusterRole{{
+				ObjectMeta: metav1.ObjectMeta{Name: "broad-reader"},
+				Rules:      []rbacv1.PolicyRule{{APIGroups: []string{"*"}, Verbs: []string{"*"}}},
+			}},
+			RoleBindings: []rbacv1.RoleBinding{{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments-broad", Namespace: "payments"},
+				RoleRef:    rbacv1.RoleRef{Kind: "ClusterRole", Name: "broad-reader"},
+				Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			}},
+		}
+		got := RbacFindings(snap)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 finding, got %d: %+v", len(got), got)
+		}
+		if got[0].BindingKind != "RoleBinding" || got[0].Namespace != "payments" {
+			t.Errorf("BindingKind/Namespace = %q/%q, want RoleBinding/payments", got[0].BindingKind, got[0].Namespace)
+		}
+	})
+
+	// A ClusterRoleBinding is cluster-scoped: an empty Namespace is what tells the dashboard the
+	// grant crosses every namespace. The subject here is a ServiceAccount living in ci-cd, so this
+	// also pins that the subject's namespace is not borrowed as the finding's.
+	t.Run("a ClusterRoleBinding finding carries no namespace", func(t *testing.T) {
+		snap := &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+			clusterAdminCRB("jenkins-admin", rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "jenkins", Namespace: "ci-cd"}),
+		}}
+		got := RbacFindings(snap)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 finding, got %d: %+v", len(got), got)
+		}
+		if got[0].Namespace != "" {
+			t.Errorf("Namespace = %q, want empty — a cluster-wide grant hidden behind a namespace filter is a false green", got[0].Namespace)
+		}
 	})
 
 	t.Run("automount is never duplicated into rbacFindings", func(t *testing.T) {
