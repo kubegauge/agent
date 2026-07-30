@@ -25,9 +25,13 @@ from the code (test-enforced). This document is the human-readable tour of every
 
 ## What NEVER leaves
 
-- **Secret and ConfigMap VALUES.** The snapshot keeps metadata only (name/namespace/type). This is
-  enforced by `TestSecretValuesNeverLeaveSnapshot` in `internal/snapshot` — the test fails the
-  build if a code change ever makes a secret value reachable from the snapshot.
+- **Anything about your Secrets — including their names.** The agent has no RBAC grant on Secrets
+  at all, so it cannot read one even by accident (`TestSnapshotNeverListsSecrets`,
+  `TestClusterRoleGrantsNoSecretAccess`).
+- **ConfigMap VALUES.** ConfigMaps are listed for their KEY NAMES only (KG-SE-003's credential
+  heuristic); values are discarded in the same loop that lists them, enforced by
+  `TestConfigMapValuesNeverLeaveSnapshot` in `internal/snapshot` — the test fails the build if a
+  code change ever makes a value reachable from the snapshot.
 - **Pod environment variables, command lines, volume contents, logs.** Never collected.
 - **Manifests.** The agent reports *verdicts about* your objects (names + booleans + counts),
   not the objects themselves.
@@ -51,6 +55,6 @@ from the code (test-enforced). This document is the human-readable tour of every
 
 ## Verify it yourself
 
-The read surface is a `list`-only ClusterRole (plus `get` on `kube-system/kubeadm-config`):
-`helm template` the chart and read `rbac.yaml`. Then read `internal/snapshot` (what is collected),
+The read surface is a `list`-only ClusterRole (plus `get` on `kube-system/kubeadm-config`), with no
+`secrets` entry anywhere in it: `helm template` the chart and read `rbac.yaml`. Then read `internal/snapshot` (what is collected),
 `internal/checks` (what is computed) and `internal/wire` (what is sent). That's the whole pipeline.

@@ -1,10 +1,17 @@
 // Package snapshot performs a single read-only collection pass (get/list only) and returns a typed
-// Snapshot for internal/report to assemble into a ScanReport. Secrets ARE listed (M3, KG-SE-*) but
-// only ever as SecretMeta (name/namespace/type): Take converts each corev1.Secret into a SecretMeta
-// within the same loop that lists them, so a Secret's Data/StringData never survives past that
-// conversion — it is never stored on Snapshot, never serialized into a ScanReport, and never
-// logged. ConfigMaps get the same treatment (ConfigMapMeta: name/namespace/key names only, never
-// values). See TestSecretValuesNeverLeaveSnapshot.
+// Snapshot for internal/report to assemble into a ScanReport.
+//
+// Secrets are NEVER listed. Discarding the values in-process was not enough: the ServiceAccount
+// token would still be a cluster-wide credential oracle for anyone who reached the pod, which is
+// exactly the pattern the agent's own KG-RB-006 fails a Role for. Kubernetes RBAC cannot express
+// "list metadata only", so the grant itself is gone from the chart's ClusterRole and this package
+// has no code path that can read a Secret even by accident (TestSnapshotNeverListsSecrets).
+//
+// ConfigMaps ARE listed, but only ever as ConfigMapMeta (name/namespace/key NAMES, never values):
+// KG-SE-003 matches key names against a credential-looking pattern, which no metadata-only
+// projection served by the API server can provide. Take converts each corev1.ConfigMap in the same
+// loop that lists it, so values never survive past that conversion — never stored on Snapshot,
+// never serialized into a ScanReport, never logged (TestConfigMapValuesNeverLeaveSnapshot).
 package snapshot
 
 import (
@@ -32,24 +39,10 @@ const (
 	kubeadmConfigMapName      = "kubeadm-config"
 )
 
-// SecretMeta is the ONLY shape a Secret is ever allowed to take once it enters this package's
-// output (M3/KG-SE-*). It intentionally has no Data/StringData field: internal/checks/secrets.go
-// needs to know a Secret exists (name, namespace) and how it is meant to be used (Type — e.g.
-// "kubernetes.io/dockerconfigjson" vs "Opaque"), never its payload. This is not merely a
-// convention: Take below converts each corev1.Secret returned by the list call into a SecretMeta
-// in the same loop iteration, so the full object (and its Data map) never leaves this function and
-// is never reachable from Snapshot, a ScanReport, or a log line. See
-// TestSecretValuesNeverLeaveSnapshot for the guarantee this is designed to uphold.
-type SecretMeta struct {
-	Name      string
-	Namespace string
-	Type      string
-}
-
-// ConfigMapMeta mirrors SecretMeta's discipline for ConfigMaps: KG-SE-003's credential-heuristic
-// check (checks/secrets.go) matches KEY NAMES against a regex (password|token|secret|...) — it
-// must never see, and therefore can never leak, the corresponding values. Only Data/BinaryData's
-// keys are kept, never their values.
+// ConfigMapMeta is the ONLY shape a ConfigMap is ever allowed to take once it enters this
+// package's output: KG-SE-003's credential-heuristic check (checks/secrets.go) matches KEY NAMES
+// against a regex (password|token|secret|...) — it must never see, and therefore can never leak,
+// the corresponding values. Only Data/BinaryData's keys are kept, never their values.
 type ConfigMapMeta struct {
 	Name      string
 	Namespace string
@@ -81,11 +74,10 @@ type Snapshot struct {
 	RoleBindings        []rbacv1.RoleBinding
 	ClusterRoleBindings []rbacv1.ClusterRoleBinding
 
-	// ConfigMaps and Secrets (M3: internal/checks/secrets.go, KG-SE-*). SECURITY-CRITICAL: these
-	// are metadata-only projections (SecretMeta/ConfigMapMeta above) — see Take's doc comment.
-	// Never add a field here that could carry a Secret's Data/StringData or a ConfigMap's values.
+	// ConfigMaps (M3: internal/checks/secrets.go, KG-SE-003). SECURITY-CRITICAL: a metadata-only
+	// projection (ConfigMapMeta above) — see Take's doc comment. Never add a field here that could
+	// carry a ConfigMap's values. There is deliberately no Secrets field: see the package doc.
 	ConfigMaps []ConfigMapMeta
-	Secrets    []SecretMeta
 
 	// ValidatingWebhookConfigs (KG-SU-004: internal/checks/supplychain.go). Cluster-scoped
 	// admission webhook configurations, listed so the image-signature-verification check can
@@ -124,9 +116,8 @@ type Snapshot struct {
 	ImageVulns *ImageVulns
 }
 
-// Take runs one read-only, get/list-only collection pass and returns a Snapshot. It DOES list
-// Secrets (M3) but immediately discards everything except name/namespace/type (SecretMeta) —
-// see this package's doc comment and SecretMeta's.
+// Take runs one read-only, get/list-only collection pass and returns a Snapshot. It never touches
+// Secrets, and keeps ConfigMaps as key names only — see this package's doc comment.
 func Take(ctx context.Context, cs kubernetes.Interface) (*Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, collectTimeout)
 	defer cancel()
@@ -241,10 +232,10 @@ func Take(ctx context.Context, cs kubernetes.Interface) (*Snapshot, error) {
 	}
 	snap.Ingresses = ingList.Items
 
-	// ConfigMaps and Secrets (M3: internal/checks/secrets.go). SECURITY-CRITICAL: converted to
-	// metadata-only structs in this same loop — see SecretMeta/ConfigMapMeta's doc comments and
-	// this package's doc comment. Do not change these loops to retain the corev1.Secret/ConfigMap
-	// objects (or their Data/StringData/BinaryData) anywhere beyond this conversion.
+	// ConfigMaps (M3: internal/checks/secrets.go). SECURITY-CRITICAL: converted to a metadata-only
+	// struct in this same loop — see ConfigMapMeta's doc comment and this package's. Do not change
+	// this loop to retain the corev1.ConfigMap objects (or their Data/BinaryData) anywhere beyond
+	// the conversion.
 	cmList, err := cs.CoreV1().ConfigMaps(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list configmaps: %w", err)
@@ -260,15 +251,6 @@ func Take(ctx context.Context, cs kubernetes.Interface) (*Snapshot, error) {
 		}
 		sort.Strings(keys)
 		snap.ConfigMaps = append(snap.ConfigMaps, ConfigMapMeta{Name: cm.Name, Namespace: cm.Namespace, Keys: keys})
-	}
-
-	secretList, err := cs.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list secrets: %w", err)
-	}
-	snap.Secrets = make([]SecretMeta, 0, len(secretList.Items))
-	for _, s := range secretList.Items {
-		snap.Secrets = append(snap.Secrets, SecretMeta{Name: s.Name, Namespace: s.Namespace, Type: string(s.Type)})
 	}
 
 	_, cmErr := cs.CoreV1().ConfigMaps(kubeadmConfigMapNamespace).Get(ctx, kubeadmConfigMapName, metav1.GetOptions{})

@@ -1,6 +1,7 @@
-// snapshot_test.go verifies Take's security-critical guarantee (M3, KG-SE-*): a Secret's
-// Data/StringData and a ConfigMap's values must never survive past the metadata-only conversion
-// inside Take, no matter how the resulting Snapshot is later serialized (JSON, logs, etc.).
+// snapshot_test.go verifies Take's security-critical guarantees: the collector never issues a
+// single read against Secrets (the ClusterRole does not grant one), and a ConfigMap's values never
+// survive past the metadata-only conversion inside Take, no matter how the resulting Snapshot is
+// later serialized (JSON, logs, etc.).
 package snapshot
 
 import (
@@ -16,11 +17,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
+
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 // secretValueMarker is a unique, unmistakable string planted as a Secret/ConfigMap VALUE in the
-// fixture below. If it ever appears in a marshaled Snapshot, a value leaked past the metadata-only
+// fixtures below. If it ever appears in a marshaled Snapshot, a value leaked past the metadata-only
 // conversion this test exists to guarantee.
 const secretValueMarker = "SUPER-SECRET-DO-NOT-LEAK-9f3c2a1b"
 
@@ -46,19 +49,49 @@ func TestTakeCollectsServices(t *testing.T) {
 	}
 }
 
-func TestSecretValuesNeverLeaveSnapshot(t *testing.T) {
+// TestSnapshotNeverListsSecrets is the guarantee behind the missing `secrets` entry in the chart's
+// ClusterRole: no code path in Take may read a Secret, so the ServiceAccount token cannot be turned
+// into a cluster-wide credential oracle. Discarding values in-process (the pre-0.16 behavior) did
+// not achieve that — the grant itself had to go.
+func TestSnapshotNeverListsSecrets(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "db-creds", Namespace: "payments"},
 		Type:       corev1.SecretTypeOpaque,
 		Data:       map[string][]byte{"password": []byte(secretValueMarker)},
 	}
+	cs := fake.NewSimpleClientset(secret)
+
+	var secretVerbs []string
+	cs.PrependReactor("*", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		secretVerbs = append(secretVerbs, action.GetVerb())
+		return false, nil, nil
+	})
+
+	snap, err := Take(context.Background(), cs)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	if len(secretVerbs) != 0 {
+		t.Fatalf("Take issued %v against secrets; the agent must never read them", secretVerbs)
+	}
+
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if strings.Contains(string(raw), secretValueMarker) {
+		t.Fatalf("marker value leaked into the serialized Snapshot:\n%s", raw)
+	}
+}
+
+func TestConfigMapValuesNeverLeaveSnapshot(t *testing.T) {
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: "payments"},
 		Data:       map[string]string{"password": secretValueMarker, "log_level": "debug"},
 		BinaryData: map[string][]byte{"cert.bin": []byte(secretValueMarker)},
 	}
 
-	cs := fake.NewSimpleClientset([]runtime.Object{secret, configMap}...)
+	cs := fake.NewSimpleClientset([]runtime.Object{configMap}...)
 
 	snap, err := Take(context.Background(), cs)
 	if err != nil {
@@ -71,14 +104,6 @@ func TestSecretValuesNeverLeaveSnapshot(t *testing.T) {
 	}
 	if strings.Contains(string(raw), secretValueMarker) {
 		t.Fatalf("marker value leaked into the serialized Snapshot:\n%s", raw)
-	}
-
-	if len(snap.Secrets) != 1 {
-		t.Fatalf("expected 1 SecretMeta, got %d: %+v", len(snap.Secrets), snap.Secrets)
-	}
-	wantSecret := SecretMeta{Name: "db-creds", Namespace: "payments", Type: "Opaque"}
-	if snap.Secrets[0] != wantSecret {
-		t.Errorf("SecretMeta = %+v, want %+v", snap.Secrets[0], wantSecret)
 	}
 
 	if len(snap.ConfigMaps) != 1 {
@@ -94,15 +119,12 @@ func TestSecretValuesNeverLeaveSnapshot(t *testing.T) {
 	}
 }
 
-func TestSecretsAndConfigMapsNeverNil(t *testing.T) {
+func TestConfigMapsNeverNil(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 
 	snap, err := Take(context.Background(), cs)
 	if err != nil {
 		t.Fatalf("Take: %v", err)
-	}
-	if snap.Secrets == nil {
-		t.Error("Secrets is nil, want a non-nil (possibly empty) slice")
 	}
 	if snap.ConfigMaps == nil {
 		t.Error("ConfigMaps is nil, want a non-nil (possibly empty) slice")

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/kubegauge/agent/internal/report"
@@ -463,24 +464,93 @@ func hasNonSystemSubject(subjects []rbacv1.Subject) bool {
 	return false
 }
 
+// secretBearingNamespaces returns the non-system namespaces the agent can PROVE hold at least one
+// Secret WITHOUT ever reading Secrets — the ClusterRole grants no access to them (see
+// charts/kubegauge-agent/templates/rbac.yaml and internal/snapshot's package doc). A namespace
+// qualifies when an object the agent does read references a Secret there: a pod spec (secret and
+// projected-secret volumes, CSI node-publish secrets, imagePullSecrets, env/envFrom secret refs),
+// a ServiceAccount (secrets/imagePullSecrets) or an Ingress TLS block.
+//
+// This is a deliberate under-approximation: a Secret nothing references is invisible to the agent,
+// so KG-RB-004 can miss a namespace whose only Secrets are unused. Losing that recall is the price
+// of not shipping a cluster-wide secret-read credential into every customer cluster — the very
+// grant KG-RB-006 fails a Role for. Referenced Secrets are also the ones that matter most here:
+// they hold the credentials a pod-create grant would let a subject mount and read.
+func secretBearingNamespaces(snap *snapshot.Snapshot) map[string]bool {
+	out := map[string]bool{}
+	mark := func(ns string) {
+		if ns != "" && !isSystemNamespace(ns) {
+			out[ns] = true
+		}
+	}
+
+	markPodSpec := func(ns string, spec *corev1.PodSpec) {
+		if len(spec.ImagePullSecrets) > 0 {
+			mark(ns)
+		}
+		for _, v := range spec.Volumes {
+			if v.Secret != nil || (v.CSI != nil && v.CSI.NodePublishSecretRef != nil) {
+				mark(ns)
+			}
+			if v.Projected != nil {
+				for _, src := range v.Projected.Sources {
+					if src.Secret != nil {
+						mark(ns)
+					}
+				}
+			}
+		}
+		for _, c := range spec.Containers {
+			if containerConsumesSecretViaEnv(c.EnvFrom, c.Env) {
+				mark(ns)
+			}
+		}
+		for _, c := range spec.InitContainers {
+			if containerConsumesSecretViaEnv(c.EnvFrom, c.Env) {
+				mark(ns)
+			}
+		}
+	}
+
+	// Pod templates (Deployments/StatefulSets/DaemonSets) and ownerless Pods...
+	for _, src := range report.WorkloadSources(snap) {
+		spec := src.Spec
+		markPodSpec(src.Namespace, &spec)
+	}
+	// ...plus every live Pod, which also covers ReplicaSet/Job/CronJob-owned pods.
+	for i := range snap.Pods {
+		markPodSpec(snap.Pods[i].Namespace, &snap.Pods[i].Spec)
+	}
+	for _, sa := range snap.ServiceAccounts {
+		if len(sa.Secrets) > 0 || len(sa.ImagePullSecrets) > 0 {
+			mark(sa.Namespace)
+		}
+	}
+	for _, ing := range snap.Ingresses {
+		for _, tls := range ing.Spec.TLS {
+			if tls.SecretName != "" {
+				mark(ing.Namespace)
+			}
+		}
+	}
+	return out
+}
+
 type podCreateInSecretNamespacesCheck struct{}
 
 func (podCreateInSecretNamespacesCheck) ID() string { return "KG-RB-004" }
 
 // Run surfaces every binding that lets a non-system subject create pods in a non-system namespace
 // holding at least one Secret — `create pods` means mounting (and reading) any Secret of that
-// namespace, per this id's catalog entry. It reports **warn**, not fail: a create-pods grant is
+// namespace, per this id's catalog entry. "Holding a Secret" is decided by secretBearingNamespaces
+// above, which infers it from references instead of listing Secrets (see its doc comment for the
+// recall this trades away, and why). It reports **warn**, not fail: a create-pods grant is
 // sometimes legitimate (CI/CD deployers, workflow engines), so this is an "audite isso" signal in
 // the same spirit as KG-RB-003, unlike the binary misconfigurations KG-RB-001/002/005/006 fail
 // on. RoleBindings are checked against their own namespace; a ClusterRoleBinding grants
 // cluster-wide, so it's reported against every secret-bearing non-system namespace at once.
 func (podCreateInSecretNamespacesCheck) Run(snap *snapshot.Snapshot) Result {
-	secretNs := map[string]bool{}
-	for _, s := range snap.Secrets {
-		if !isSystemNamespace(s.Namespace) {
-			secretNs[s.Namespace] = true
-		}
-	}
+	secretNs := secretBearingNamespaces(snap)
 	if len(secretNs) == 0 {
 		return Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}}
 	}

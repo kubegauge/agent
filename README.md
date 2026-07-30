@@ -27,9 +27,15 @@ resources).
 A `list`-only ClusterRole over the resource types needed by the checks — pods, workloads
 (Deployments/StatefulSets/DaemonSets), ServiceAccounts, Services, Namespaces, Nodes,
 ResourceQuotas/LimitRanges, NetworkPolicies, Ingresses, RBAC objects, validating webhooks —
-plus `get` for `kube-system/kubeadm-config` only. **Secrets and ConfigMaps are metadata-only**:
-the snapshot retains name/namespace/type and never reads values — enforced by
-`TestSecretValuesNeverLeaveSnapshot`. The agent never writes to the cluster.
+plus `get` for `kube-system/kubeadm-config` only. The agent never writes to the cluster.
+
+**Secrets are not readable by the agent at all**: the ClusterRole grants nothing on them, because
+RBAC cannot express "list metadata only" and a token that can list Secrets cluster-wide is a
+credential oracle no matter how careful the code is (`TestClusterRoleGrantsNoSecretAccess`,
+`TestSnapshotNeverListsSecrets`). **ConfigMaps are read for their KEY NAMES only** — the input to
+KG-SE-003's credential heuristic — and values never survive collection
+(`TestConfigMapValuesNeverLeaveSnapshot`). See [the chart README](charts/kubegauge-agent/README.md#rbac-surface)
+for the trade this makes in KG-RB-004.
 
 ## Development
 

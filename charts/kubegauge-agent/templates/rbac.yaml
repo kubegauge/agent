@@ -1,5 +1,13 @@
-# rbac.yaml — minimal read-only ClusterRole: exactly what snapshot.Take reads, verb list
-# (get only on configmaps, for the kube-system/kubeadm-config heuristic). No watch.
+# rbac.yaml — minimal read-only ClusterRole: exactly what snapshot.Take reads, verb list. No watch.
+#
+# secrets are deliberately ABSENT. RBAC cannot express "list metadata only", so a `list secrets`
+# grant would make this ServiceAccount token a cluster-wide credential oracle for anyone who
+# reached the pod — the pattern the agent's own KG-RB-006 fails a Role for. KG-RB-004 infers
+# secret-bearing namespaces from references instead (see internal/checks/rbac.go).
+#
+# configmaps carry `list` because KG-SE-003 matches ConfigMap KEY NAMES, which no metadata-only
+# projection provides; `get` alone would only serve the kube-system/kubeadm-config heuristic. Only
+# key names ever leave the collector (internal/snapshot.ConfigMapMeta), never values.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -8,7 +16,7 @@ metadata:
     {{- include "kubegauge-agent.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: [nodes, namespaces, pods, serviceaccounts, services, resourcequotas, limitranges, secrets]
+    resources: [nodes, namespaces, pods, serviceaccounts, services, resourcequotas, limitranges]
     verbs: [list]
   - apiGroups: [""]
     resources: [configmaps]

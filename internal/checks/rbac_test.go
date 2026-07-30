@@ -6,7 +6,9 @@ import (
 	"reflect"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -472,9 +474,116 @@ func podCreateRole(ns, name string) rbacv1.Role {
 	}
 }
 
-func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
-	paymentsSecret := snapshot.SecretMeta{Name: "db-password", Namespace: "payments", Type: "Opaque"}
+// podMountingSecret builds a Pod that mounts a Secret as a volume. The agent never lists Secrets
+// (see secretBearingNamespaces in rbac.go), so a reference like this one is what tells KG-RB-004
+// that a namespace holds one.
+func podMountingSecret(ns, name string) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{{
+				Name:         "creds",
+				VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "db-password"}},
+			}},
+		},
+	}
+}
 
+// TestSecretBearingNamespaces pins the reference shapes that count as evidence of a Secret, and
+// the ones that must not: the agent has no secrets grant, so this inference is all KG-RB-004 has.
+func TestSecretBearingNamespaces(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want []string
+	}{
+		{
+			name: "empty snapshot yields nothing",
+			snap: &snapshot.Snapshot{},
+			want: []string{},
+		},
+		{
+			name: "secret volume on a live pod",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{podMountingSecret("payments", "api-0")}},
+			want: []string{"payments"},
+		},
+		{
+			name: "projected secret volume",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{Name: "api-0", Namespace: "payments"},
+				Spec: corev1.PodSpec{Volumes: []corev1.Volume{{
+					Name: "projected",
+					VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+						Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{}}},
+					}},
+				}}},
+			}}},
+			want: []string{"payments"},
+		},
+		{
+			name: "secret consumed as an env var in a Deployment template",
+			snap: &snapshot.Snapshot{Deployments: []appsv1.Deployment{{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "frontend"},
+				Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "web",
+						Env: []corev1.EnvVar{{
+							Name:      "DB_PASSWORD",
+							ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{}},
+						}},
+					}},
+				}}},
+			}}},
+			want: []string{"frontend"},
+		},
+		{
+			name: "imagePullSecrets count",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{Name: "api-0", Namespace: "payments"},
+				Spec:       corev1.PodSpec{ImagePullSecrets: []corev1.LocalObjectReference{{Name: "registry"}}},
+			}}},
+			want: []string{"payments"},
+		},
+		{
+			name: "ServiceAccount and Ingress TLS references count",
+			snap: &snapshot.Snapshot{
+				ServiceAccounts: []corev1.ServiceAccount{{
+					ObjectMeta:       metav1.ObjectMeta{Name: "deployer", Namespace: "ci"},
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "registry"}},
+				}},
+				Ingresses: []networkingv1.Ingress{{
+					ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "frontend"},
+					Spec:       networkingv1.IngressSpec{TLS: []networkingv1.IngressTLS{{SecretName: "web-tls"}}},
+				}},
+			},
+			want: []string{"ci", "frontend"},
+		},
+		{
+			name: "system namespaces are excluded",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{podMountingSecret("kube-system", "kube-dns")}},
+			want: []string{},
+		},
+		{
+			name: "a pod that references no secret is not evidence",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{Name: "api-0", Namespace: "payments"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+			}}},
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sortedKeys(secretBearingNamespaces(tt.snap))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 	tests := []struct {
 		name string
 		snap *snapshot.Snapshot
@@ -488,8 +597,8 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 		{
 			name: "RoleBinding granting create pods in a namespace with secrets warns",
 			snap: &snapshot.Snapshot{
-				Secrets: []snapshot.SecretMeta{paymentsSecret},
-				Roles:   []rbacv1.Role{podCreateRole("payments", "deployer")},
+				Pods:  []corev1.Pod{podMountingSecret("payments", "api-0")},
+				Roles: []rbacv1.Role{podCreateRole("payments", "deployer")},
 				RoleBindings: []rbacv1.RoleBinding{{
 					ObjectMeta: metav1.ObjectMeta{Name: "ci-deployer", Namespace: "payments"},
 					RoleRef:    rbacv1.RoleRef{Kind: "Role", Name: "deployer"},
@@ -513,10 +622,10 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 		{
 			name: "ClusterRoleBinding granting create pods warns for every non-system namespace with secrets",
 			snap: &snapshot.Snapshot{
-				Secrets: []snapshot.SecretMeta{
-					paymentsSecret,
-					{Name: "api-key", Namespace: "frontend", Type: "Opaque"},
-					{Name: "sa-token", Namespace: "kube-system", Type: "kubernetes.io/service-account-token"},
+				Pods: []corev1.Pod{
+					podMountingSecret("payments", "api-0"),
+					podMountingSecret("frontend", "web-0"),
+					podMountingSecret("kube-system", "kube-dns-0"),
 				},
 				ClusterRoles: []rbacv1.ClusterRole{{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-creator"},
@@ -535,7 +644,7 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 		{
 			name: "system subjects are excluded",
 			snap: &snapshot.Snapshot{
-				Secrets: []snapshot.SecretMeta{paymentsSecret},
+				Pods: []corev1.Pod{podMountingSecret("payments", "api-0")},
 				ClusterRoles: []rbacv1.ClusterRole{{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-creator"},
 					Rules: []rbacv1.PolicyRule{
@@ -553,7 +662,7 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 		{
 			name: "read-only pod access does not warn",
 			snap: &snapshot.Snapshot{
-				Secrets: []snapshot.SecretMeta{paymentsSecret},
+				Pods: []corev1.Pod{podMountingSecret("payments", "api-0")},
 				Roles: []rbacv1.Role{{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-reader", Namespace: "payments"},
 					Rules: []rbacv1.PolicyRule{
@@ -571,9 +680,9 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 		{
 			name: "RoleBinding referencing a ClusterRole with wildcard verbs warns in its namespace only",
 			snap: &snapshot.Snapshot{
-				Secrets: []snapshot.SecretMeta{
-					paymentsSecret,
-					{Name: "other", Namespace: "frontend", Type: "Opaque"},
+				Pods: []corev1.Pod{
+					podMountingSecret("payments", "api-0"),
+					podMountingSecret("frontend", "web-0"),
 				},
 				ClusterRoles: []rbacv1.ClusterRole{{
 					ObjectMeta: metav1.ObjectMeta{Name: "ns-admin"},
