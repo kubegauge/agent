@@ -107,12 +107,56 @@ var All = []Check{
 	backupDisasterRecoveryCheck{},
 }
 
+// resourceDependencies maps an OPTIONAL resource kind — named exactly as the ClusterRole and
+// snapshot.CollectionError name it — to the checks that cannot be evaluated without it. When the
+// collector could not read a kind (a trimmed RBAC grant, a timeout on a huge cluster), Run reports
+// those checks as "na": not evaluated, excluded from the score, instead of the "pass" that an empty
+// input would otherwise fake. Core kinds never appear here — their absence aborts the whole
+// collection pass in internal/snapshot, because no honest report survives it.
+var resourceDependencies = map[string][]string{
+	"serviceaccounts":                 {"KG-RB-003"},
+	"roles":                           {"KG-RB-002", "KG-RB-004", "KG-RB-006"},
+	"clusterroles":                    {"KG-RB-002", "KG-RB-004", "KG-RB-006"},
+	"rolebindings":                    {"KG-RB-004", "KG-RB-005"},
+	"clusterrolebindings":             {"KG-RB-001", "KG-RB-004", "KG-RB-005"},
+	"validatingwebhookconfigurations": {"KG-SU-004"},
+	"resourcequotas":                  {"KG-QT-001"},
+	"limitranges":                     {"KG-QT-002"},
+	"ingresses":                       {"KG-IN-001"},
+	"configmaps":                      {"KG-SE-003"},
+}
+
+// rbacBindingResources are the kinds RbacFindings reads; without them the finding list is not
+// "empty", it is unknown, so it degrades to empty rather than reporting a clean cluster.
+var rbacBindingResources = []string{"roles", "clusterroles", "rolebindings", "clusterrolebindings"}
+
+// unevaluableChecks returns the check ids whose inputs are missing from this snapshot.
+func unevaluableChecks(snap *snapshot.Snapshot) map[string]bool {
+	out := map[string]bool{}
+	for _, ce := range snap.Uncollected {
+		for _, id := range resourceDependencies[ce.Resource] {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // Run evaluates every registered Check and returns the raw wire results (id + runtime verdict
 // only) — the push payload. No catalog join happens here: the educational catalog lives in the
 // KubeGauge platform and is joined by check id server-side.
 func Run(snap *snapshot.Snapshot) []wire.CheckResult {
+	unevaluable := unevaluableChecks(snap)
 	out := make([]wire.CheckResult, 0, len(All))
 	for _, c := range All {
+		if unevaluable[c.ID()] {
+			out = append(out, wire.CheckResult{
+				ID:                c.ID(),
+				Status:            "na",
+				Namespaces:        []string{},
+				AffectedResources: []string{},
+			})
+			continue
+		}
 		res := c.Run(snap)
 		out = append(out, wire.CheckResult{
 			ID:                c.ID(),

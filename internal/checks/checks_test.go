@@ -9,6 +9,9 @@ package checks
 import (
 	"testing"
 
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/kubegauge/agent/internal/snapshot"
 )
 
@@ -19,6 +22,64 @@ func TestNoDuplicateCheckIDs(t *testing.T) {
 			t.Errorf("duplicate check id in registry: %s", c.ID())
 		}
 		seen[c.ID()] = true
+	}
+}
+
+// TestEveryDependencyNamesARegisteredCheck keeps resourceDependencies from rotting into a map of
+// ids nobody implements any more.
+func TestEveryDependencyNamesARegisteredCheck(t *testing.T) {
+	registered := map[string]bool{}
+	for _, c := range All {
+		registered[c.ID()] = true
+	}
+	for resource, ids := range resourceDependencies {
+		for _, id := range ids {
+			if !registered[id] {
+				t.Errorf("resourceDependencies[%q] names %s, which is not a registered check", resource, id)
+			}
+		}
+	}
+}
+
+// TestUncollectedResourcesDegradeDependentChecksToNA is the honesty half of the partial-collection
+// contract: a check whose input never arrived must report "na" (excluded from the score), never the
+// "pass" an empty input would otherwise produce, and no other check may be affected.
+func TestUncollectedResourcesDegradeDependentChecksToNA(t *testing.T) {
+	snap := &snapshot.Snapshot{
+		Uncollected: []snapshot.CollectionError{{Resource: "configmaps", Reason: "configmaps is forbidden"}},
+	}
+
+	byID := map[string]string{}
+	for _, rc := range Run(snap) {
+		byID[rc.ID] = rc.Status
+	}
+	if byID["KG-SE-003"] != "na" {
+		t.Errorf("KG-SE-003 = %q, want na (its ConfigMaps were never collected)", byID["KG-SE-003"])
+	}
+	if byID["KG-SE-002"] == "na" {
+		t.Error("KG-SE-002 does not read ConfigMaps and must keep its verdict")
+	}
+}
+
+// TestRbacFindingsAreEmptyWhenRbacWasNotCollected: an uncollected binding list means "unknown", and
+// unknown must not render as a cluster with no risky bindings.
+func TestRbacFindingsAreEmptyWhenRbacWasNotCollected(t *testing.T) {
+	crb := rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-admin"},
+		RoleRef:    rbacv1.RoleRef{Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "jenkins", Namespace: "ci-cd"}},
+	}
+	complete := &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{crb}}
+	if len(RbacFindings(complete)) == 0 {
+		t.Fatal("fixture is wrong: a cluster-admin binding must produce a finding")
+	}
+
+	degraded := &snapshot.Snapshot{
+		ClusterRoleBindings: []rbacv1.ClusterRoleBinding{crb},
+		Uncollected:         []snapshot.CollectionError{{Resource: "roles", Reason: "timeout"}},
+	}
+	if got := RbacFindings(degraded); len(got) != 0 {
+		t.Errorf("RbacFindings = %+v, want an empty list when the RBAC objects were not all collected", got)
 	}
 }
 

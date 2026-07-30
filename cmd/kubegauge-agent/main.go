@@ -34,6 +34,7 @@ func main() {
 	healthzAddr := fs.String("healthz-addr", "0.0.0.0:8787", "bind address of the probe-only healthz endpoint")
 	noTrivy := fs.Bool("no-trivy", false, "disable image vulnerability scanning (KG-SU-003 reports info)")
 	trivyCacheDir := fs.String("trivy-cache-dir", "", "trivy result cache directory (empty disables caching)")
+	collectTimeout := fs.Duration("collect-timeout", snapshot.DefaultCollectTimeout, "budget for one collection pass over the API server (raise it on very large clusters)")
 	_ = fs.Parse(os.Args[1:])
 
 	if *clusterName == "" || *ingestURL == "" || *apiKeyFile == "" {
@@ -71,9 +72,14 @@ func main() {
 
 	firstTrivy := true
 	scan := func(ctx context.Context) (*wire.AgentReport, error) {
-		snap, err := snapshot.Take(ctx, cs)
+		snap, err := snapshot.TakeWithOptions(ctx, cs, snapshot.Options{Timeout: *collectTimeout})
 		if err != nil {
 			return nil, err
+		}
+		// A partial pass still reports; it must never look complete. The dependent checks come out
+		// as "na" (never a fake "pass"), and the reason lands here for the operator.
+		for _, ce := range snap.Uncollected {
+			fmt.Fprintf(os.Stderr, "kubegauge-agent: could not collect %s (%s) — checks that need it report N/A\n", ce.Resource, ce.Reason)
 		}
 		if scanner != nil {
 			if firstTrivy {

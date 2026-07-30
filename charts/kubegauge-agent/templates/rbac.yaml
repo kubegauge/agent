@@ -7,7 +7,9 @@
 #
 # configmaps carry `list` because KG-SE-003 matches ConfigMap KEY NAMES, which no metadata-only
 # projection provides; `get` alone would only serve the kube-system/kubeadm-config heuristic. Only
-# key names ever leave the collector (internal/snapshot.ConfigMapMeta), never values.
+# key names ever leave the collector (internal/snapshot.ConfigMapMeta), never values. Set
+# rbac.readConfigMapKeys=false to drop the verb: the collector degrades that one list gracefully
+# and KG-SE-003 reports "na" instead of a verdict.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -20,7 +22,7 @@ rules:
     verbs: [list]
   - apiGroups: [""]
     resources: [configmaps]
-    verbs: [get, list]
+    verbs: [get{{ if .Values.rbac.readConfigMapKeys }}, list{{ end }}]
   - apiGroups: [apps]
     resources: [deployments, statefulsets, daemonsets]
     verbs: [list]

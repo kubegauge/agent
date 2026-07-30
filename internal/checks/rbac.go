@@ -660,7 +660,16 @@ func riskyRoleReason(key string, wildcard, secrets map[string]bool) (reason stri
 //
 // Findings are sorted by (bindingKind, binding, subject) before sequential ids are assigned, so
 // RB-F-NNN numbering is deterministic regardless of the snapshot's internal slice order.
+//
+// When the collection pass could not read the RBAC objects at all, the answer is "unknown", not
+// "none": the list comes back empty, and the KG-RB-* checks that would have carried the same
+// evidence report "na" (see resourceDependencies in checks.go).
 func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
+	for _, resource := range rbacBindingResources {
+		if snap.Missing(resource) {
+			return []report.RbacFinding{}
+		}
+	}
 	wildcardRoles, secretsRoles := riskyRoleSets(snap)
 
 	drafts := []report.RbacFinding{}

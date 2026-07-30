@@ -17,7 +17,7 @@ from the code (test-enforced). This document is the human-readable tour of every
 | `clusterName` | The name YOU configured in the chart | `prod-east` |
 | `takenAt` | Scan timestamp (UTC) | `2026-07-17T12:00:00Z` |
 | `kubernetes` | Version, distribution heuristic, node/namespace counts | `v1.33.1`, `eks`, `12`, `31` |
-| `checks[]` | Per check id: `status` (pass/fail/warn/info), affected `namespaces`, `affectedResources` (kind/namespace/name strings), and for the image-scan check `imageFindings` (image refs + CVE counts + top CVE ids) | `{"id":"KG-NP-001","status":"fail","namespaces":["apps"],...}` |
+| `checks[]` | Per check id: `status` (pass/fail/warn/info/na — `na` means the check was not applicable or could not be evaluated, and it is excluded from the score), affected `namespaces`, `affectedResources` (kind/namespace/name strings), and for the image-scan check `imageFindings` (image refs + CVE counts + top CVE ids) | `{"id":"KG-NP-001","status":"fail","namespaces":["apps"],...}` |
 | `namespaces[]` | Name, PSA labels, pod count, default-deny flags | `{"name":"apps","psaEnforce":null,...}` |
 | `workloads[]` | Workload identity (kind/namespace/name) + security posture booleans (runAsNonRoot, seccomp, etc.) | — |
 | `rbacFindings[]` | Risky bindings: subject, binding, role names + reason | — |

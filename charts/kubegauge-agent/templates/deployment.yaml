@@ -36,6 +36,7 @@ spec:
             - --ingest-url={{ required "ingestUrl is required — the base URL of the KubeGauge API" .Values.ingestUrl }}
             - --api-key-file=/var/run/kubegauge/api-key
             - --scan-interval={{ .Values.scanInterval }}
+            - --collect-timeout={{ .Values.collectTimeout }}
             - --trivy-cache-dir=/cache/results
             {{- if not .Values.trivy.enabled }}
             - --no-trivy

@@ -14,6 +14,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -116,6 +117,94 @@ func TestConfigMapValuesNeverLeaveSnapshot(t *testing.T) {
 	wantKeys := []string{"cert.bin", "log_level", "password"}
 	if !reflect.DeepEqual(gotCM.Keys, wantKeys) {
 		t.Errorf("ConfigMapMeta.Keys = %v, want %v (sorted, key names only, no values)", gotCM.Keys, wantKeys)
+	}
+}
+
+// TestListAllFollowsContinueTokens covers the pagination that replaced 18 unbounded cluster-wide
+// List calls: a collection that arrives in pages must come back whole.
+func TestListAllFollowsContinueTokens(t *testing.T) {
+	pages := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}
+	var seen []string
+	got, err := listAll(context.Background(), func(_ context.Context, o metav1.ListOptions) ([]string, string, error) {
+		if o.Limit != listPageSize {
+			t.Errorf("page requested with Limit %d, want %d", o.Limit, listPageSize)
+		}
+		seen = append(seen, o.Continue)
+		i := len(seen) - 1
+		next := ""
+		if i+1 < len(pages) {
+			next = "token-" + pages[i+1][0]
+		}
+		return pages[i], next, nil
+	})
+	if err != nil {
+		t.Fatalf("listAll: %v", err)
+	}
+	if want := []string{"a", "b", "c", "d", "e"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("items = %v, want %v", got, want)
+	}
+	if want := []string{"", "token-c", "token-e"}; !reflect.DeepEqual(seen, want) {
+		t.Errorf("continue tokens sent = %v, want %v", seen, want)
+	}
+}
+
+// TestListAllRestartsOnExpiredContinueToken: a pass long enough to outlive the API server's
+// snapshot gets 410 Gone halfway through. Restarting beats failing the scan.
+func TestListAllRestartsOnExpiredContinueToken(t *testing.T) {
+	var calls int
+	got, err := listAll(context.Background(), func(_ context.Context, o metav1.ListOptions) ([]string, string, error) {
+		calls++
+		switch {
+		case calls == 1:
+			return []string{"a"}, "expiring-token", nil
+		case calls == 2:
+			return nil, "", apierrors.NewResourceExpired("continue token expired")
+		default:
+			return []string{"a", "b"}, "", nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("listAll: %v", err)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("items after restart = %v, want %v", got, want)
+	}
+}
+
+// TestOptionalCollectionFailureDegradesInsteadOfAborting is the "a partial report beats no report"
+// contract: an operator who trims `list configmaps` out of the ClusterRole (or a cluster where that
+// one list times out) still gets every other check, and the gap is recorded rather than hidden.
+func TestOptionalCollectionFailureDegradesInsteadOfAborting(t *testing.T) {
+	cs := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"}})
+	cs.PrependReactor("list", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(corev1.Resource("configmaps"), "", nil)
+	})
+
+	snap, err := Take(context.Background(), cs)
+	if err != nil {
+		t.Fatalf("an optional collection failure must not fail the pass: %v", err)
+	}
+	if len(snap.Pods) != 1 {
+		t.Errorf("the rest of the snapshot must still be collected, got %d pods", len(snap.Pods))
+	}
+	if !snap.Missing("configmaps") {
+		t.Fatalf("configmaps failure not recorded: %+v", snap.Uncollected)
+	}
+	if snap.Missing("pods") {
+		t.Error("pods collected fine but reported as missing")
+	}
+}
+
+// TestCoreCollectionFailureAborts: the other half of the contract. A report without pods would
+// describe an empty cluster, so it is never sent.
+func TestCoreCollectionFailureAborts(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(corev1.Resource("pods"), "", nil)
+	})
+
+	if _, err := Take(context.Background(), cs); err == nil {
+		t.Fatal("a core collection failure must fail the whole pass")
 	}
 }
 

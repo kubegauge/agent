@@ -15,6 +15,17 @@ apiKey: ""
 # (free: 24h, pro/ai: 1h) — a faster interval here just earns polite 429s.
 scanInterval: 1h
 
+# Budget for one collection pass over the API server. Every list is paginated, so the default is
+# generous enough for very large clusters; raise it if the logs show collection timeouts.
+collectTimeout: 10m
+
+rbac:
+  # ConfigMaps are listed for their KEY NAMES only (never values) to feed KG-SE-003's
+  # credential-name heuristic. Set to false to keep `get` (needed for the kube-system/kubeadm-config
+  # distribution heuristic) and drop `list`: the agent degrades that collection gracefully and
+  # KG-SE-003 reports N/A. Secrets are never granted at all — see the chart README.
+  readConfigMapKeys: true
+
 image:
   repository: ghcr.io/kubegauge/agent
   # Empty = chart appVersion. Release images carry a leading "v" (agent:v0.16.0); a bare semver set

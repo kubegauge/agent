@@ -32,9 +32,22 @@ creates.
 | `ingestUrl` | — (required) | Base URL of the KubeGauge API |
 | `apiKey` | — (required) | Cluster API key (stored in a chart-managed Secret) |
 | `scanInterval` | `1h` | Interval between pushed scans (plan minimums enforced server-side) |
+| `collectTimeout` | `10m` | Budget for one (paginated) collection pass over the API server |
+| `rbac.readConfigMapKeys` | `true` | `list configmaps` for KG-SE-003's key-name heuristic; `false` drops the verb and the check reports N/A |
 | `image.repository` / `image.tag` | ghcr / appVersion | Agent image |
 | `trivy.enabled` | `true` | Image vulnerability scanning (KG-SU-003) |
 | `resources` | requests 100m/128Mi, limits 1/1Gi | Hardened-by-default pod sizing |
+
+## Large clusters, and what happens when a read fails
+
+Every list is paginated, and the whole pass runs inside `collectTimeout` (10m by default, not the
+30s that used to make big clusters fail every scan forever). Resources split in two: the core ones
+(nodes, namespaces, pods, workloads, NetworkPolicies, Services) whose absence would make the report
+describe a cluster that does not exist — a failure there aborts the pass and the agent retries —
+and the rest, whose absence only costs the checks that read them. Those failures are recorded, the
+dependent checks report **N/A** instead of a "pass" faked from empty input, and the reason is
+logged. That is what makes trimming a grant (`rbac.readConfigMapKeys=false`) a supported choice
+rather than a broken install.
 
 ## RBAC surface
 
