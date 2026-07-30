@@ -36,10 +36,46 @@ func writeKeyFile(t *testing.T, content string) string {
 
 func newTestRunner(t *testing.T, url string) *Runner {
 	t.Helper()
-	r := New(url, writeKeyFile(t, "kga_testkey\n"), "test", time.Hour, time.Second,
-		func(context.Context) (*wire.AgentReport, error) { return testReport(), nil })
+	// httptest serves http://127.0.0.1:port, which is exactly the case AllowInsecureHTTP exists for.
+	r, err := New(Config{
+		IngestURL: url, KeyFile: writeKeyFile(t, "kga_testkey\n"), Version: "test",
+		ScanEvery: time.Hour, PollEvery: time.Second, AllowInsecureHTTP: true,
+	}, func(context.Context) (*wire.AgentReport, error) { return testReport(), nil })
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	r.sleep = func(time.Duration) {}
 	return r
+}
+
+// TestIngestURLMustBeHTTPS: the cluster API key rides in an Authorization header on every request,
+// so an http:// endpoint has to be an explicit, deliberate choice — not something a typo in a
+// values file can arrange.
+func TestIngestURLMustBeHTTPS(t *testing.T) {
+	tests := []struct {
+		name          string
+		url           string
+		allowInsecure bool
+		wantErr       bool
+	}{
+		{name: "https is the norm", url: "https://api.kubegauge.com", allowInsecure: false},
+		{name: "http is refused by default", url: "http://api.kubegauge.com", allowInsecure: false, wantErr: true},
+		{name: "http with the explicit opt-in (the kind dev loop)", url: "http://host.docker.internal:8080", allowInsecure: true},
+		{name: "a bare host is not a URL the agent can trust", url: "api.kubegauge.com", allowInsecure: false, wantErr: true},
+		{name: "other schemes are refused outright", url: "ftp://api.kubegauge.com", allowInsecure: true, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateIngestURL(tt.url, tt.allowInsecure)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateIngestURL(%q, %v) error = %v, wantErr %v", tt.url, tt.allowInsecure, err, tt.wantErr)
+			}
+			if _, err := New(Config{IngestURL: tt.url, AllowInsecureHTTP: tt.allowInsecure}, nil); (err != nil) != tt.wantErr {
+				t.Errorf("New with %q must refuse the same URLs ValidateIngestURL does (err = %v)", tt.url, err)
+			}
+		})
+	}
 }
 
 func TestPushSendsGzipJSONWithAuth(t *testing.T) {

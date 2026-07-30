@@ -1,5 +1,7 @@
 // Package push implements the agent's outbound loop: scan → gzip POST /v1/ingest, plus the ~30s
-// GET /v1/agent/commands poll (heartbeat + on-demand scans). Resilience contract (spec §2):
+// GET /v1/agent/commands poll (heartbeat + on-demand scans). Every request carries the cluster API
+// key, so the ingest URL must be https unless the operator explicitly opts into cleartext for a
+// local endpoint (Config.AllowInsecureHTTP). Resilience contract (spec §2):
 // exponential backoff with jitter on push failures, 15 min quiet period on 401 (revoked key)
 // without ever crash-looping, Retry-After honored on 429, freshest report kept in memory for
 // resend. A failed push never terminates the process — the pod stays Ready and the dashboard
@@ -14,6 +16,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -51,13 +54,56 @@ type Runner struct {
 	pushNotBefore time.Time         // 429 Retry-After window
 }
 
-func New(ingestURL, keyFile, version string, scanEvery, pollEvery time.Duration, scan ScanFunc) *Runner {
+// Config is the runner's wiring. AllowInsecureHTTP is the only knob with a security meaning — see
+// ValidateIngestURL.
+type Config struct {
+	IngestURL string
+	KeyFile   string
+	Version   string
+	ScanEvery time.Duration
+	PollEvery time.Duration
+	// AllowInsecureHTTP permits an http:// ingest URL. Off by default: the cluster API key travels
+	// in an Authorization header on every push and every poll, so over plain HTTP it is readable by
+	// anything on the path, and a key is enough to impersonate the cluster. The kind dev loop
+	// (make agent-dev, pushing to http://host.docker.internal:8080) is the reason the escape hatch
+	// exists at all; it must never be the default.
+	AllowInsecureHTTP bool
+}
+
+// ValidateIngestURL rejects an ingest URL the agent must not send its API key to. Called by New so
+// a misconfiguration fails at startup with an explanation, instead of leaking the key on the first
+// push.
+func ValidateIngestURL(raw string, allowInsecureHTTP bool) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("ingest URL %q is not a URL: %w", raw, err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("ingest URL %q has no host — it must be absolute, e.g. https://api.kubegauge.com", raw)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if allowInsecureHTTP {
+			return nil
+		}
+		return fmt.Errorf("ingest URL %q uses http: the cluster API key would travel in cleartext on every request. Use https, or pass --allow-insecure-http (chart: allowInsecureHttp=true) if this is a local development endpoint", raw)
+	default:
+		return fmt.Errorf("ingest URL %q must use https (got scheme %q)", raw, u.Scheme)
+	}
+}
+
+func New(cfg Config, scan ScanFunc) (*Runner, error) {
+	if err := ValidateIngestURL(cfg.IngestURL, cfg.AllowInsecureHTTP); err != nil {
+		return nil, err
+	}
 	return &Runner{
-		ingestURL: strings.TrimRight(ingestURL, "/"),
-		keyFile:   keyFile,
-		version:   version,
-		scanEvery: scanEvery,
-		pollEvery: pollEvery,
+		ingestURL: strings.TrimRight(cfg.IngestURL, "/"),
+		keyFile:   cfg.KeyFile,
+		version:   cfg.Version,
+		scanEvery: cfg.ScanEvery,
+		pollEvery: cfg.PollEvery,
 		scan:      scan,
 		client:    &http.Client{Timeout: clientTimeout},
 		logf: func(format string, args ...any) {
@@ -65,7 +111,7 @@ func New(ingestURL, keyFile, version string, scanEvery, pollEvery time.Duration,
 		},
 		sleep: time.Sleep,
 		now:   time.Now,
-	}
+	}, nil
 }
 
 // Run blocks until ctx is done: one scan+push at startup, then the two tickers.

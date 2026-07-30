@@ -3,9 +3,14 @@
 # Cluster name shown in the KubeGauge dashboard. Empty = release name.
 clusterName: ""
 
-# Base URL of the KubeGauge API this agent pushes to (REQUIRED).
-# e.g. https://api.kubegauge.com — or http://host.docker.internal:8080 for local dev from kind.
+# Base URL of the KubeGauge API this agent pushes to (REQUIRED). Must be https: the cluster API key
+# travels in an Authorization header on every request. e.g. https://api.kubegauge.com
 ingestUrl: ""
+
+# Allow an http:// ingestUrl. Development only — with this on, the cluster API key travels in
+# cleartext and anything on the path can steal it. The kind dev loop (make agent-dev, pushing to
+# http://host.docker.internal:8080) is what this exists for.
+allowInsecureHttp: false
 
 # Cluster API key from the KubeGauge dashboard wizard (REQUIRED). Stored in a Secret created by
 # this chart and mounted as a file; the key is shown exactly once at creation/rotation.

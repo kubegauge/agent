@@ -36,6 +36,7 @@ func main() {
 	noTrivy := fs.Bool("no-trivy", false, "disable image vulnerability scanning (KG-SU-003 reports info)")
 	trivyCacheDir := fs.String("trivy-cache-dir", "", "trivy result cache directory (empty disables caching)")
 	collectTimeout := fs.Duration("collect-timeout", snapshot.DefaultCollectTimeout, "budget for one collection pass over the API server (raise it on very large clusters)")
+	allowInsecureHTTP := fs.Bool("allow-insecure-http", false, "allow an http:// ingest URL (development only — the cluster API key would travel in cleartext)")
 	_ = fs.Parse(os.Args[1:])
 
 	if *clusterName == "" || *ingestURL == "" || *apiKeyFile == "" {
@@ -99,7 +100,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	runner, err := push.New(push.Config{
+		IngestURL:         *ingestURL,
+		KeyFile:           *apiKeyFile,
+		Version:           version,
+		ScanEvery:         *scanInterval,
+		PollEvery:         *pollInterval,
+		AllowInsecureHTTP: *allowInsecureHTTP,
+	}, scan)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	if *allowInsecureHTTP {
+		fmt.Fprintln(os.Stderr, "kubegauge-agent: WARNING --allow-insecure-http is set; the cluster API key may travel in cleartext")
+	}
+
 	fmt.Fprintf(os.Stderr, "kubegauge-agent %s: cluster %q → %s (scan %s, poll %s)\n",
 		version, *clusterName, *ingestURL, scanInterval.String(), pollInterval.String())
-	push.New(*ingestURL, *apiKeyFile, version, *scanInterval, *pollInterval, scan).Run(ctx)
+	runner.Run(ctx)
 }

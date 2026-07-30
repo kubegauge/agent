@@ -3,6 +3,8 @@ KIND_CLUSTER ?= kubegauge-dev
 IMAGE_REPO   ?= kubegauge-agent
 IMAGE_TAG    ?= dev
 NAMESPACE    ?= kubegauge
+# http is fine here and ONLY here: the deploy below passes allowInsecureHttp=true explicitly, which
+# the agent refuses to assume. A real install must use https.
 INGEST_URL   ?= http://host.docker.internal:8080
 
 .PHONY: kind-up agent-dev agent-logs
@@ -21,6 +23,7 @@ agent-dev: kind-up ## image build + kind load + chart (re)deploy pushing to the 
 		--set image.pullPolicy=Never \
 		--set clusterName=$(KIND_CLUSTER) \
 		--set ingestUrl=$(INGEST_URL) \
+		--set allowInsecureHttp=true \
 		--set apiKey=$(KG_API_KEY)
 	kubectl -n $(NAMESPACE) rollout restart deployment/kubegauge-agent
 	kubectl -n $(NAMESPACE) rollout status deployment/kubegauge-agent --timeout=180s

@@ -1,5 +1,8 @@
 # deployment.yaml — the agent: 1 replica, hardened to pass its own workload checks.
 # Outbound-only (push mode): no inbound connections except the pod-local /healthz for probes.
+{{- if and (hasPrefix "http://" .Values.ingestUrl) (not .Values.allowInsecureHttp) }}
+{{- fail "ingestUrl uses http://, which would send the cluster API key in cleartext. Use https://, or set allowInsecureHttp=true if this is a local development endpoint." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,6 +41,9 @@ spec:
             - --scan-interval={{ .Values.scanInterval }}
             - --collect-timeout={{ .Values.collectTimeout }}
             - --trivy-cache-dir=/cache/results
+            {{- if .Values.allowInsecureHttp }}
+            - --allow-insecure-http
+            {{- end }}
             {{- if not .Values.trivy.enabled }}
             - --no-trivy
             {{- end }}

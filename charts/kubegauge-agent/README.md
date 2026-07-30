@@ -29,7 +29,8 @@ creates.
 | Key | Default | Description |
 |---|---|---|
 | `clusterName` | release name | Cluster name shown in the dashboard |
-| `ingestUrl` | — (required) | Base URL of the KubeGauge API |
+| `ingestUrl` | — (required) | Base URL of the KubeGauge API (must be `https://`) |
+| `allowInsecureHttp` | `false` | Permit an `http://` ingestUrl — development only, the API key then travels in cleartext |
 | `apiKey` | — (required) | Cluster API key (stored in a chart-managed Secret) |
 | `scanInterval` | `1h` | Interval between pushed scans (plan minimums enforced server-side) |
 | `collectTimeout` | `10m` | Budget for one (paginated) collection pass over the API server |
