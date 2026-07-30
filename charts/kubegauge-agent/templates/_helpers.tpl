@@ -22,3 +22,19 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kubegauge-agent.clusterName" -}}
 {{- default .Release.Name .Values.clusterName -}}
 {{- end -}}
+
+{{/*
+kubegauge-agent.image resolves the full image reference. Release images are published as
+ghcr.io/kubegauge/agent:v<semver> (WITH the leading "v"), so a bare semver — whether it came from
+Chart.appVersion or from --set image.tag=0.16.0 — is prefixed here rather than turning into an
+ImagePullBackOff. Anything that is not a bare semver (dev, latest, a branch name, a pre-release
+built by hand) is passed through untouched.
+*/}}
+{{- define "kubegauge-agent.image" -}}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+" $tag -}}
+{{- printf "%s:v%s" .Values.image.repository $tag -}}
+{{- else -}}
+{{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
+{{- end -}}

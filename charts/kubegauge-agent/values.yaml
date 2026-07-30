@@ -17,7 +17,8 @@ scanInterval: 1h
 
 image:
   repository: ghcr.io/kubegauge/agent
-  # Empty = chart appVersion.
+  # Empty = chart appVersion. Release images carry a leading "v" (agent:v0.16.0); a bare semver set
+  # here gets the prefix added for you, anything else (dev, latest) is used verbatim.
   tag: ""
   pullPolicy: IfNotPresent
 

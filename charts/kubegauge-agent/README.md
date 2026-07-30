@@ -17,6 +17,13 @@ helm install kubegauge-agent oci://ghcr.io/kubegauge/charts/kubegauge-agent \
   --set apiKey=<kga_... from the dashboard wizard>
 ```
 
+Install the **published OCI chart**, as above. Installing from a git checkout of `main` works, but
+`main` describes the *next* release: its `appVersion` names an image tag that only exists once that
+release is cut, and its templates assume that agent (the RBAC surface and the image move together).
+For a checkout install between releases, pin an image explicitly with `--set image.tag=v0.15.0` —
+and read the release notes first, because an older agent may need grants this chart no longer
+creates.
+
 ## Values
 
 | Key | Default | Description |

@@ -52,6 +52,18 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
       - uses: azure/setup-helm@v4
+      - name: chart version matches the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          CHART_VERSION="$(grep '^version:' charts/kubegauge-agent/Chart.yaml | awk '{print $2}')"
+          CHART_APP_VERSION="$(grep '^appVersion:' charts/kubegauge-agent/Chart.yaml | awk '{print $2}' | tr -d '"')"
+          # Without this, a release can publish agent:$TAG while the chart still defaults to an
+          # older appVersion — an install straight from the repo then pulls an image that does not
+          # exist. Bump Chart.yaml in the same commit as the release.
+          test "$CHART_VERSION" = "$VERSION" || { echo "Chart.yaml version=$CHART_VERSION, tag says $VERSION"; exit 1; }
+          test "$CHART_APP_VERSION" = "$TAG" || { echo "Chart.yaml appVersion=$CHART_APP_VERSION, tag says $TAG"; exit 1; }
       - name: publish the chart as OCI
         env:
           TAG: ${{ github.ref_name }}

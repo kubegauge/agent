@@ -40,6 +40,42 @@ func inlineListItems(line string) []string {
 	return out
 }
 
+// chartField reads a top-level scalar out of Chart.yaml ("version: 0.16.0"), unquoted.
+func chartField(t *testing.T, name string) string {
+	t.Helper()
+	for _, line := range strings.Split(readChartFile(t, "Chart.yaml"), "\n") {
+		if value, ok := strings.CutPrefix(line, name+":"); ok {
+			return strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	t.Fatalf("Chart.yaml has no %s field", name)
+	return ""
+}
+
+// TestChartVersionsAgree stops the release drift that shipped chart 0.13.0 with an image tag that
+// was never published: CI packages the chart as --version ${TAG#v} and publishes the image as
+// agent:$TAG, so `version` and `appVersion` must be the same release expressed both ways. The
+// tag-side half of this (does the release tag match Chart.yaml at all?) is enforced by the
+// "chart version matches the tag" step in .github/workflows/ci.yml.
+func TestChartVersionsAgree(t *testing.T) {
+	version, appVersion := chartField(t, "version"), chartField(t, "appVersion")
+	if appVersion != "v"+version {
+		t.Errorf("Chart.yaml appVersion = %q, want %q (the published image tag for chart version %s)", appVersion, "v"+version, version)
+	}
+}
+
+// TestDeploymentResolvesImageThroughHelper keeps the "v" normalization from being bypassed by a
+// future edit that inlines the tag again.
+func TestDeploymentResolvesImageThroughHelper(t *testing.T) {
+	deployment := readChartFile(t, "templates/deployment.yaml")
+	if !strings.Contains(deployment, `include "kubegauge-agent.image"`) {
+		t.Error(`templates/deployment.yaml must build the image reference with the "kubegauge-agent.image" helper`)
+	}
+	if strings.Contains(deployment, ".Values.image.tag") {
+		t.Error("templates/deployment.yaml must not read .Values.image.tag directly — the helper normalizes it")
+	}
+}
+
 // TestClusterRoleGrantsNoSecretAccess is the chart-side half of the guarantee
 // internal/snapshot.TestSnapshotNeverListsSecrets makes in code: Kubernetes RBAC cannot express
 // "list metadata only", so the only way the agent's ServiceAccount token stops being a
