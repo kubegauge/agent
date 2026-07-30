@@ -47,10 +47,10 @@ func TestParseTrivyJSONCountsAndTopCVEs(t *testing.T) {
 		t.Errorf("TopCVEs[0] = %+v, want severity critical / fixedVersion 3.0.13-1", res.TopCVEs[0])
 	}
 	if res.TopCVEs[3].FixedVersion != "" {
-		t.Errorf("CVE sem FixedVersion deve ficar vazia, got %q", res.TopCVEs[3].FixedVersion)
+		t.Errorf("a CVE with no FixedVersion must stay empty, got %q", res.TopCVEs[3].FixedVersion)
 	}
 	if res.ScanError != "" {
-		t.Errorf("ScanError = %q, want vazio", res.ScanError)
+		t.Errorf("ScanError = %q, want empty", res.ScanError)
 	}
 }
 
@@ -147,14 +147,14 @@ func TestScanSnapshotUsesCacheOnSecondPass(t *testing.T) {
 	first := s.ScanSnapshot(context.Background(), snap)
 
 	failing := func(ctx context.Context, bin string, args ...string) ([]byte, error) {
-		t.Error("segundo pass deveria vir 100% do cache")
+		t.Error("the second pass should come 100% from the cache")
 		return nil, errors.New("should not run")
 	}
 	s2 := testScanner(failing, dir)
 	second := s2.ScanSnapshot(context.Background(), snap)
 
 	if !reflect.DeepEqual(first.ByRef, second.ByRef) {
-		t.Errorf("cache deve reproduzir o resultado: first %+v != second %+v", first.ByRef, second.ByRef)
+		t.Errorf("the cache must reproduce the result: first %+v != second %+v", first.ByRef, second.ByRef)
 	}
 }
 
@@ -185,7 +185,7 @@ func TestScanSnapshotCacheKeyPrefersDigest(t *testing.T) {
 func TestNewScannerNilWhenBinaryMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if s := NewScanner(""); s != nil {
-		t.Error("sem trivy no PATH, NewScanner deve retornar nil")
+		t.Error("with no trivy on PATH, NewScanner must return nil")
 	}
 }
 

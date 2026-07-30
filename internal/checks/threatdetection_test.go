@@ -39,7 +39,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 		wantResources []string
 	}{
 		{
-			name: "Falco reconhecido pelo nome do DaemonSet",
+			name: "Falco recognized by its DaemonSet name",
 			daemonSets: []appsv1.DaemonSet{
 				rtDaemonSet("falco", "falco", "docker.io/falcosecurity/falco:0.38.0"),
 			},
@@ -57,7 +57,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 			wantResources: []string{"daemonset/kube-system/runtime-agent"},
 		},
 		{
-			name: "case-insensitive no nome",
+			name: "name matched case-insensitively",
 			daemonSets: []appsv1.DaemonSet{
 				rtDaemonSet("security", "KubeArmor", "kubearmor/kubearmor:stable"),
 			},
@@ -76,7 +76,7 @@ func TestRuntimeThreatDetectionCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "cluster sem DaemonSets → warn",
+			name:          "cluster with no DaemonSets -> warn",
 			daemonSets:    nil,
 			wantStatus:    "warn",
 			wantNS:        []string{},

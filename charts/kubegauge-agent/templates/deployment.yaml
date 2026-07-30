@@ -51,7 +51,7 @@ spec:
             - --no-trivy
             {{- end }}
           env:
-            # Cache do banco de CVEs do trivy (baixado em runtime; some com o pod — emptyDir).
+            # trivy's CVE database cache (downloaded at runtime; dies with the pod — emptyDir).
             - name: TRIVY_CACHE_DIR
               value: /cache/trivy-db
             - name: TMPDIR

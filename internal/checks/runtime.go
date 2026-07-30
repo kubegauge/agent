@@ -57,7 +57,7 @@ func (appArmorRuntimeDefaultCheck) ID() string { return "KG-RT-002" }
 // Run flags every workload (outside system namespaces) whose worst-of-containers AppArmor profile
 // is anything other than "runtime/default", as a warn rather than a fail: AppArmor only exists on
 // nodes whose kernel has it enabled (Ubuntu/Debian) — the mock's own explanation says exactly this
-// ("Verifique se o kernel do node tem AppArmor") — so a finding here is a real but
+// ("Check whether the node kernel has AppArmor") — so a finding here is a real but
 // environment-dependent signal, not an unconditional hard failure.
 func (appArmorRuntimeDefaultCheck) Run(snap *snapshot.Snapshot) Result {
 	var resources []string

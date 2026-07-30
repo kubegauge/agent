@@ -545,7 +545,7 @@ func (podCreateInSecretNamespacesCheck) ID() string { return "KG-RB-004" }
 // namespace, per this id's catalog entry. "Holding a Secret" is decided by secretBearingNamespaces
 // above, which infers it from references instead of listing Secrets (see its doc comment for the
 // recall this trades away, and why). It reports **warn**, not fail: a create-pods grant is
-// sometimes legitimate (CI/CD deployers, workflow engines), so this is an "audite isso" signal in
+// sometimes legitimate (CI/CD deployers, workflow engines), so this is an "audit this" signal in
 // the same spirit as KG-RB-003, unlike the binary misconfigurations KG-RB-001/002/005/006 fail
 // on. RoleBindings are checked against their own namespace; a ClusterRoleBinding grants
 // cluster-wide, so it's reported against every secret-bearing non-system namespace at once.

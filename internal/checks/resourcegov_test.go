@@ -28,7 +28,7 @@ func TestNamespaceResourceQuotaCheck(t *testing.T) {
 		wantResources []string
 	}{
 		{
-			name:          "workload namespace sem quota",
+			name:          "workload namespace with no quota",
 			namespaces:    []corev1.Namespace{ns("payments")},
 			quotas:        nil,
 			wantStatus:    "warn",
@@ -64,7 +64,7 @@ func TestNamespaceResourceQuotaCheck(t *testing.T) {
 			wantResources: []string{"namespace/web"},
 		},
 		{
-			name:          "cluster sem namespaces de workload",
+			name:          "cluster with no workload namespaces",
 			namespaces:    nil,
 			quotas:        nil,
 			wantStatus:    "pass",
@@ -92,7 +92,7 @@ func TestNamespaceLimitRangeCheck(t *testing.T) {
 		wantResources []string
 	}{
 		{
-			name:          "workload namespace sem limitrange",
+			name:          "workload namespace with no limitrange",
 			namespaces:    []corev1.Namespace{ns("payments")},
 			limitRanges:   nil,
 			wantStatus:    "warn",

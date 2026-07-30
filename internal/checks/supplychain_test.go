@@ -141,10 +141,10 @@ func imageDeployment(ns, name, image string) appsv1.Deployment {
 func TestImageVulnScanCheck(t *testing.T) {
 	check := imageVulnScanCheck{}
 
-	t.Run("sem scanner vira info", func(t *testing.T) {
+	t.Run("no scanner becomes info", func(t *testing.T) {
 		res := check.Run(&snapshot.Snapshot{})
 		if res.Status != "info" || len(res.AffectedResources) != 0 || res.ImageFindings != nil {
-			t.Errorf("Run = %+v, want info sem recursos nem findings", res)
+			t.Errorf("Run = %+v, want info with no resources and no findings", res)
 		}
 	})
 
@@ -180,21 +180,21 @@ func TestImageVulnScanCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("sem high nem critical vira pass com findings", func(t *testing.T) {
+	t.Run("neither high nor critical becomes pass, with findings", func(t *testing.T) {
 		snap := vulnSnapshot(
 			&snapshot.ImageVulns{ByRef: map[string]snapshot.ImageScanResult{"api:1.0": {Medium: 5, Low: 2}}},
 			imageDeployment("default", "api", "api:1.0"),
 		)
 		res := check.Run(snap)
 		if res.Status != "pass" || len(res.AffectedResources) != 0 {
-			t.Errorf("Run = %+v, want pass sem recursos afetados", res)
+			t.Errorf("Run = %+v, want pass with no affected resources", res)
 		}
 		if len(res.ImageFindings) != 1 || res.ImageFindings[0].Medium != 5 {
-			t.Errorf("findings devem existir mesmo no pass: %+v", res.ImageFindings)
+			t.Errorf("findings must be present even on a pass: %+v", res.ImageFindings)
 		}
 	})
 
-	t.Run("todas com erro vira warn", func(t *testing.T) {
+	t.Run("every image failing becomes warn", func(t *testing.T) {
 		snap := vulnSnapshot(
 			&snapshot.ImageVulns{ByRef: map[string]snapshot.ImageScanResult{
 				"a:1": {ScanError: "timeout"}, "b:2": {ScanError: "auth"},
@@ -203,14 +203,14 @@ func TestImageVulnScanCheck(t *testing.T) {
 		)
 		res := check.Run(snap)
 		if res.Status != "warn" || len(res.AffectedResources) != 0 {
-			t.Errorf("Run = %+v, want warn sem recursos (nada foi escaneado)", res)
+			t.Errorf("Run = %+v, want warn with no resources (nothing was scanned)", res)
 		}
 		if res.ImageFindings[0].ScanError == "" {
-			t.Errorf("finding deve carregar o ScanError: %+v", res.ImageFindings[0])
+			t.Errorf("the finding must carry the ScanError: %+v", res.ImageFindings[0])
 		}
 	})
 
-	t.Run("scanner rodou mas cluster sem workloads vira pass", func(t *testing.T) {
+	t.Run("scanner ran but the cluster has no workloads: pass", func(t *testing.T) {
 		snap := vulnSnapshot(&snapshot.ImageVulns{ByRef: map[string]snapshot.ImageScanResult{}})
 		if res := check.Run(snap); res.Status != "pass" {
 			t.Errorf("Status = %s, want pass", res.Status)
@@ -227,7 +227,7 @@ func TestImageVulnScanCheck(t *testing.T) {
 		)
 		res := check.Run(snap)
 		if res.ImageFindings[0].Image != "alfa:1" || res.ImageFindings[1].Image != "zeta:1" {
-			t.Errorf("findings fora de ordem: %+v", res.ImageFindings)
+			t.Errorf("findings out of order: %+v", res.ImageFindings)
 		}
 		cve := res.ImageFindings[0].TopCves[0]
 		if cve.ID != "CVE-9" || cve.Severity != "high" || cve.FixedVersion != "2" {
@@ -244,7 +244,7 @@ func TestRunCarriesImageFindingsIntoComplianceCheck(t *testing.T) {
 	for _, c := range Run(snap) {
 		if c.ID == "KG-SU-003" {
 			if len(c.ImageFindings) != 1 {
-				t.Errorf("Run deve copiar ImageFindings para o ComplianceCheck: %+v", c.ImageFindings)
+				t.Errorf("Run must copy ImageFindings into the ComplianceCheck: %+v", c.ImageFindings)
 			}
 			return
 		}

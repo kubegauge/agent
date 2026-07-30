@@ -39,7 +39,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 		wantResources []string
 	}{
 		{
-			name: "External Secrets Operator reconhecido pelo nome",
+			name: "External Secrets Operator recognized by name",
 			deployments: []appsv1.Deployment{
 				esmDeployment("external-secrets", "external-secrets", "ghcr.io/external-secrets/external-secrets:v0.9.0"),
 			},
@@ -57,7 +57,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 			wantResources: []string{"deploy/vault/injector"},
 		},
 		{
-			name: "Sealed Secrets controller, case-insensitive no nome",
+			name: "Sealed Secrets controller, matched case-insensitively",
 			deployments: []appsv1.Deployment{
 				esmDeployment("kube-system", "Sealed-Secrets-Controller", "docker.io/bitnami/sealed-secrets-controller:0.27.0"),
 			},
@@ -76,7 +76,7 @@ func TestExternalSecretsManagementCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "cluster sem Deployments → info",
+			name:          "cluster with no Deployments -> info",
 			deployments:   nil,
 			wantStatus:    "info",
 			wantNS:        []string{},

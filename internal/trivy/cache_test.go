@@ -27,7 +27,7 @@ func TestDiskCacheRoundtrip(t *testing.T) {
 
 	got, ok := c.get("sha256:abc", cacheNow.Add(time.Hour))
 	if !ok {
-		t.Fatal("esperava cache hit dentro do TTL")
+		t.Fatal("expected a cache hit within the TTL")
 	}
 	if !reflect.DeepEqual(got, sampleResult()) {
 		t.Errorf("get = %+v, want %+v", got, sampleResult())
@@ -58,7 +58,7 @@ func TestDiskCacheCorruptFileIsMiss(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("expected 1 cache file, got %d (err %v)", len(entries), err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, entries[0].Name()), []byte("{corrompido"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, entries[0].Name()), []byte("{corrupted"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.get("k", cacheNow); ok {
@@ -67,9 +67,9 @@ func TestDiskCacheCorruptFileIsMiss(t *testing.T) {
 }
 
 func TestNilDiskCacheIsSafe(t *testing.T) {
-	c := newDiskCache("") // dir vazio = cache desabilitado
+	c := newDiskCache("") // empty dir = cache disabled
 	if c != nil {
-		t.Fatal("newDiskCache(\"\") deve retornar nil")
+		t.Fatal("newDiskCache(\"\") must return nil")
 	}
 	c.put("k", sampleResult(), cacheNow) // must not panic
 	if _, ok := c.get("k", cacheNow); ok {

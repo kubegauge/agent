@@ -236,7 +236,7 @@ func TestEvalAdditivity(t *testing.T) {
 	})
 }
 
-// ---- egress AND ingress: both ends must permit (PLAN §8: "veredito final = egress de A permite
+// ---- egress AND ingress: both ends must permit (PLAN §8: "final verdict = A's egress permits
 // E ingress de B permite") -------------------------------------------------------------------------
 
 func TestEvalEgressAndIngressBothRequired(t *testing.T) {
@@ -739,8 +739,8 @@ func TestEvalPolicyTypesDefaulting(t *testing.T) {
 	})
 }
 
-// ---- Verdict.Policy attribution determinism (PLAN §8: "a policy que continha a regra de match
-// (allowed) ou a policy que ativou o default-deny (denied)") ---------------------------------------
+// ---- Verdict.Policy attribution determinism (PLAN §8: "the policy holding the matching rule
+// (allowed), or the policy that triggered the default-deny (denied)") --------------------------
 
 func TestEvalPolicyAttribution(t *testing.T) {
 	allowFrontend := ingressPolicy("default", "allow-frontend", map[string]string{"role": "db"},

@@ -76,7 +76,7 @@ func loadCorpus(t *testing.T) *corpusFile {
 	return &c
 }
 
-// corpusPeer converte a chave de endpoint do corpus ("ns/pod" ou "ip:<addr>") em um Peer.
+// corpusPeer turns a corpus endpoint key ("ns/pod" or "ip:<addr>") into a Peer.
 func corpusPeer(t *testing.T, key string, pods map[string]*PodInfo) Peer {
 	t.Helper()
 	if ip, ok := strings.CutPrefix(key, "ip:"); ok {
@@ -84,7 +84,7 @@ func corpusPeer(t *testing.T, key string, pods map[string]*PodInfo) Peer {
 	}
 	pod, ok := pods[key]
 	if !ok {
-		t.Fatalf("corpus referencia pod desconhecido %q", key)
+		t.Fatalf("corpus references unknown pod %q", key)
 	}
 	return Peer{Pod: pod}
 }
@@ -97,7 +97,7 @@ func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 		t.Fatalf("suspicious corpus: only %d cases (expected 200+)", len(c.Cases))
 	}
 	if len(c.Flows) == 0 {
-		t.Fatal("corpus sem flows")
+		t.Fatal("corpus has no flows")
 	}
 
 	namespaces := make([]corev1.Namespace, 0, len(c.Namespaces))
@@ -142,7 +142,7 @@ func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 
 	for caseIdx, tc := range c.Cases {
 		if len(tc.Verdicts) != len(flows) {
-			t.Fatalf("caso %d (%q): %d vereditos para %d flows", caseIdx, tc.Description, len(tc.Verdicts), len(flows))
+			t.Fatalf("case %d (%q): %d verdicts for %d flows", caseIdx, tc.Description, len(tc.Verdicts), len(flows))
 		}
 
 		policies := make([]networkingv1.NetworkPolicy, 0, len(tc.Policies))
@@ -163,7 +163,7 @@ func TestCrossValidationAgainstPolicyAssistant(t *testing.T) {
 				caseMismatches++
 				totalMismatches++
 				if totalMismatches <= maxDetailed {
-					t.Errorf("caso %d (%q): flow %s → veredito %s, policy-assistant espera %s",
+					t.Errorf("case %d (%q): flow %s -> verdict %s, policy-assistant expects %s",
 						caseIdx, tc.Description, describeFlow(c.Flows[i]), verdictName(got), verdictName(want))
 				}
 			}

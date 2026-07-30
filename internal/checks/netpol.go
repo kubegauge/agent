@@ -11,7 +11,7 @@
 //     default-deny-egress test to every non-system namespace instead — the exact mechanism
 //     PLAN-FASE-2.md §6 lists as computable (default-deny egress per namespace), just without
 //     the (undecidable) namespace-criticality filter.
-//   - KG-NP-004 ("kube-system protegido contra acesso de workloads") is implemented as a
+//   - KG-NP-004 ("kube-system protected from workload access") is implemented as a
 //     structural existence check — "does kube-system have at least one Ingress-type
 //     NetworkPolicy" — rather than a full traffic-semantics evaluation of which pods can actually
 //     reach kube-system; that engine is explicitly deferred to M5 (PLAN-FASE-2.md §8). This

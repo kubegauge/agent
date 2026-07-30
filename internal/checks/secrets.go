@@ -1,7 +1,7 @@
 // secrets.go implements two of the three KG-SE-* checks (Secrets & Data): how workloads consume
 // Secrets (env vars vs. volumes) and a credential-name heuristic over ConfigMap KEY NAMES only.
 //
-// KG-SE-001 ("Encryption at rest habilitada para secrets no etcd") is implemented in
+// KG-SE-001 ("Encryption at rest enabled for secrets in etcd") is implemented in
 // controlplane.go instead (M4), not here: it audits the kube-apiserver's --encryption-provider-
 // config flag via the exact same static-pod-discovery/flag-parsing/managed-cluster-degradation
 // machinery as the KG-CP-* checks, so it is colocated with that mechanism for one implementation

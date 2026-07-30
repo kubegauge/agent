@@ -62,7 +62,7 @@ func (c *diskCache) get(key string, now time.Time) (snapshot.ImageScanResult, bo
 	}
 	var e cacheEntry
 	if err := json.Unmarshal(data, &e); err != nil {
-		return snapshot.ImageScanResult{}, false // corrompido = miss, re-escaneia
+		return snapshot.ImageScanResult{}, false // corrupted = miss, rescan
 	}
 	if now.Sub(e.StoredAt) > cacheTTL {
 		return snapshot.ImageScanResult{}, false

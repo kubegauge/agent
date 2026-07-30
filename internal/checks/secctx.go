@@ -35,7 +35,7 @@ func (runAsNonRootCheck) ID() string { return "KG-SC-001" }
 
 // Run flags every workload (outside system namespaces) whose worst-of-containers RunAsNonRoot is
 // false — i.e. at least one container neither sets runAsNonRoot: true itself nor inherits it from
-// the pod, matching the mock's own root-cause: "runAsNonRoot: true faz o kubelet RECUSAR iniciar o
+// the pod, matching the mock's own root-cause: "runAsNonRoot: true makes the kubelet REFUSE to start the
 // container". A hard, deterministic fail: there is no legitimate exception mirrored in the mock.
 func (runAsNonRootCheck) Run(snap *snapshot.Snapshot) Result {
 	var resources []string
@@ -109,7 +109,7 @@ func (allowPrivilegeEscalationCheck) ID() string { return "KG-SC-004" }
 
 // Run flags every workload (outside system namespaces) whose worst-of-containers
 // AllowPrivilegeEscalation is true (the K8s default when unset). Deterministic fail — the mock's
-// own explanation notes this control has "sem custo para a maioria dos apps" (no legitimate
+// own explanation notes this control comes "at no cost for most apps" (no legitimate
 // exception to weigh against, unlike KG-SC-003's capabilities).
 func (allowPrivilegeEscalationCheck) Run(snap *snapshot.Snapshot) Result {
 	var resources []string

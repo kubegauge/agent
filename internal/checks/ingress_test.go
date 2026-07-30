@@ -42,7 +42,7 @@ func TestIngressTLSCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name: "ingress sem bloco TLS",
+			name: "ingress with no TLS block",
 			ingresses: []networkingv1.Ingress{
 				ingress("frontend", "web", nil, "app.example.com"),
 			},
@@ -51,7 +51,7 @@ func TestIngressTLSCheck(t *testing.T) {
 			wantResources: []string{"ingress/frontend/web"},
 		},
 		{
-			name: "bloco TLS com hosts vazios cobre tudo (cert default)",
+			name: "a TLS block with no hosts covers everything (default cert)",
 			ingresses: []networkingv1.Ingress{
 				ingress("frontend", "web", []networkingv1.IngressTLS{{}}, "app.example.com", "api.example.com"),
 			},
@@ -60,7 +60,7 @@ func TestIngressTLSCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name: "TLS cobre um host mas outro fica em texto claro",
+			name: "TLS covers one host while another stays in cleartext",
 			ingresses: []networkingv1.Ingress{
 				ingress("frontend", "web", []networkingv1.IngressTLS{{Hosts: []string{"app.example.com"}}}, "app.example.com", "admin.example.com"),
 			},
@@ -80,7 +80,7 @@ func TestIngressTLSCheck(t *testing.T) {
 			wantResources: []string{"ingress/frontend/legacy", "ingress/shop/checkout"},
 		},
 		{
-			name:          "cluster sem ingresses",
+			name:          "cluster with no ingresses",
 			ingresses:     nil,
 			wantStatus:    "pass",
 			wantNS:        []string{},

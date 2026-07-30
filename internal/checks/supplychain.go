@@ -2,7 +2,7 @@
 // (:latest / no tag, without a compensating digest) and images pulled from outside a registry
 // allowlist.
 //
-// KG-SU-003 ("Scan de vulnerabilidades nas imagens em uso") is fed by the internal/trivy
+// KG-SU-003 ("Vulnerability scan of the images in use") is fed by the internal/trivy
 // enrichment: it reads snap.ImageVulns (nil = trivy unavailable/disabled -> info) instead of the
 // API snapshot, since no get/list of Kubernetes objects can reveal what CVEs an image's layers
 // contain. Status: any CRITICAL -> fail, any HIGH -> warn, otherwise pass; MEDIUM/LOW only show in
@@ -36,7 +36,7 @@ func (mutableImageTagCheck) ID() string { return "KG-SU-001" }
 // missing (bare "nginx", which resolves to :latest) or explicitly "latest", AND no digest
 // compensates for it.
 //
-// Deviation from a literal reading of the task brief ("imagens... sem digest" as its own trigger):
+// Deviation from a literal reading of the task brief ("images... without a digest" as its own trigger):
 // we do NOT fail every image that merely lacks a digest. Pinning by digest is rare in ordinary
 // manifests (most legitimately use "image:1.25"-style tags with no digest), so an unconditional
 // "missing digest -> fail" would fire on nearly every container in nearly every real cluster,

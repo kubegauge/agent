@@ -39,7 +39,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 		wantResources []string
 	}{
 		{
-			name: "Velero reconhecido pelo nome do Deployment",
+			name: "Velero recognized by its Deployment name",
 			deployments: []appsv1.Deployment{
 				drDeployment("velero", "velero", "velero/velero:v1.14.0"),
 			},
@@ -57,7 +57,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 			wantResources: []string{"deploy/backup/backup-controller"},
 		},
 		{
-			name: "Kasten K10 case-insensitive no nome",
+			name: "Kasten K10 matched case-insensitively",
 			deployments: []appsv1.Deployment{
 				drDeployment("kasten-io", "K10-catalog", "gcr.io/kasten-images/catalog:6.5.0"),
 			},
@@ -76,7 +76,7 @@ func TestBackupDisasterRecoveryCheck(t *testing.T) {
 			wantResources: []string{},
 		},
 		{
-			name:          "cluster sem Deployments → warn",
+			name:          "cluster with no Deployments -> warn",
 			deployments:   nil,
 			wantStatus:    "warn",
 			wantNS:        []string{},

@@ -13,7 +13,7 @@ kind-up: ## creates the dev kind cluster if absent
 	kind get clusters 2>/dev/null | grep -qx $(KIND_CLUSTER) || kind create cluster --name $(KIND_CLUSTER)
 
 agent-dev: kind-up ## image build + kind load + chart (re)deploy pushing to the host API
-	@test -n "$(KG_API_KEY)" || { echo "erro: exporte KG_API_KEY (rode 'make seed' no platform e copie o export)"; exit 1; }
+	@test -n "$(KG_API_KEY)" || { echo "error: export KG_API_KEY (run 'make seed' in the platform repo and copy the export line)"; exit 1; }
 	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) .
 	kind load docker-image $(IMAGE_REPO):$(IMAGE_TAG) --name $(KIND_CLUSTER)
 	helm upgrade --install kubegauge-agent charts/kubegauge-agent \

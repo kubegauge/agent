@@ -65,7 +65,7 @@ type corpusNamespace struct {
 	Labels map[string]string `json:"labels"`
 }
 
-// corpusFlow referencia endpoints por chave: "ns/pod" para pods, "ip:<addr>" para externos.
+// corpusFlow references endpoints by key: "ns/pod" for pods, "ip:<addr>" for external peers.
 type corpusFlow struct {
 	From     string `json:"from"`
 	To       string `json:"to"`
@@ -115,7 +115,7 @@ func buildPods() []corpusPod {
 	return pods
 }
 
-// externalIPs: dentro do CIDR /24 (fora do except /28), dentro do except /28, e fora de tudo.
+// externalIPs: inside the /24 CIDR (outside the /28 except), inside the /28 except, and outside everything.
 var externalIPs = []string{"192.168.100.100", "192.168.100.5", "8.8.8.8"}
 
 // unservedProbes exercises endPort ranges and unresolvable named ports (no pod serves them).
@@ -150,7 +150,7 @@ func buildFlows(pods []corpusPod) []corpusFlow {
 			fromExt := strings.HasPrefix(from, "ip:")
 			toExt := strings.HasPrefix(to, "ip:")
 			if fromExt && toExt {
-				continue // externo→externo: nenhuma policy se aplica, sem valor
+				continue // external to external: no policy applies, no value in it
 			}
 			if toExt {
 				for _, pr := range externalDestProbes {
