@@ -5,8 +5,11 @@ Kubernetes cluster **read-only, through the API server**, and pushes the complia
 KubeGauge API. One agent per cluster, installed with a single `helm install`.
 
 > **Push-only (Phase 4, M1):** the agent makes outbound requests only — it pushes scan reports to
-> the KubeGauge API and polls it for on-demand scan commands. **No inbound connections, ever**
-> (the old in-cluster HTTP endpoint is gone; only `GET /healthz` remains, pod-local, for probes).
+> the KubeGauge API and polls it for on-demand scan commands. It serves no API and has no Service:
+> the old in-cluster HTTP endpoint is gone, and the only listener left is `GET /healthz` on 8787
+> for kubelet probes. That port is bound on `0.0.0.0`, so other pods can reach it like any pod
+> port; from v0.16.0 the chart ships an opt-in NetworkPolicy (`networkPolicy.enabled=true`) that
+> denies all ingress to the agent.
 > What leaves your cluster is documented in [docs/what-leaves-your-cluster.md](docs/what-leaves-your-cluster.md)
 > and formalized by [schema/agent-report.v1.schema.json](schema/agent-report.v1.schema.json),
 > generated from the code.

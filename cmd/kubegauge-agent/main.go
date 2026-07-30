@@ -58,20 +58,6 @@ func main() {
 		}
 	}
 
-	// Probe-only HTTP surface: liveness/readiness. Deliberately NOT the old scan API — nothing
-	// consumes the agent over the network anymore.
-	go func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		})
-		if err := http.ListenAndServe(*healthzAddr, mux); err != nil {
-			fmt.Fprintln(os.Stderr, "kubegauge-agent: healthz:", err)
-			os.Exit(1)
-		}
-	}()
-
 	firstTrivy := true
 	scan := func(ctx context.Context) (*wire.AgentReport, error) {
 		snap, err := snapshot.TakeWithOptions(ctx, cs, snapshot.Options{Timeout: *collectTimeout})
@@ -107,11 +93,44 @@ func main() {
 		ScanEvery:         *scanInterval,
 		PollEvery:         *pollInterval,
 		AllowInsecureHTTP: *allowInsecureHTTP,
+		// A collection pass, a first trivy run and a push with retries all happen inside one loop
+		// iteration, so the liveness window has to clear the collection budget with room to spare.
+		LivenessTimeout: max(30*time.Minute, 2*(*collectTimeout)),
 	}, scan)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+
+	// Probe-only HTTP surface: liveness/readiness. Deliberately NOT the old scan API — nothing
+	// consumes the agent over the network anymore. /healthz answers from the runner's own state, so
+	// an outbound loop wedged inside a scan or a push gets the pod restarted; a static 200 from an
+	// independent goroutine (the pre-0.16 behavior) could not tell the difference between working
+	// and hung.
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+			alive, summary := runner.Alive()
+			if !alive {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintln(w, "wedged:", summary)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintln(w, "ok:", summary)
+		})
+		srv := &http.Server{
+			Addr:    *healthzAddr,
+			Handler: mux,
+			// Without it, a client that opens a connection and never finishes its headers holds a
+			// goroutine and a file descriptor indefinitely.
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		if err := srv.ListenAndServe(); err != nil {
+			fmt.Fprintln(os.Stderr, "kubegauge-agent: healthz:", err)
+			os.Exit(1)
+		}
+	}()
 	if *allowInsecureHTTP {
 		fmt.Fprintln(os.Stderr, "kubegauge-agent: WARNING --allow-insecure-http is set; the cluster API key may travel in cleartext")
 	}

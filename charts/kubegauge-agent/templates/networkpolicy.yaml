@@ -1,0 +1,26 @@
+{{- if .Values.networkPolicy.enabled }}
+# networkpolicy.yaml — opt-in ingress lockdown for the agent pod.
+#
+# The agent is outbound-only, but "no inbound connections" was never quite true: it binds
+# 0.0.0.0:8787 for the kubelet's probes, and any pod in the cluster could reach that port. This
+# policy denies every ingress connection to the agent. Egress is deliberately not listed in
+# policyTypes, so the agent keeps reaching the API server and your ingest URL untouched.
+#
+# It is opt-in because kubelet probe traffic originates on the node, and whether a CNI subjects
+# host-to-pod traffic to NetworkPolicy is implementation-specific: on a CNI that does police it,
+# enabling this makes the probes fail and the pod restart forever. Enable it, then check the pod
+# stays Ready.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kubegauge-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubegauge-agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kubegauge-agent.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress: []
+{{- end }}

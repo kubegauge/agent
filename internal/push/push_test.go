@@ -345,6 +345,48 @@ func TestPollIdleDeliversPendingReport(t *testing.T) {
 	}
 }
 
+// TestAliveDetectsAWedgedLoop: /healthz used to be a static 200 served by an independent
+// goroutine, so a hung scan or push loop was never restarted. Liveness now follows the loop.
+func TestAliveDetectsAWedgedLoop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	r := newTestRunner(t, srv.URL)
+	r.now = func() time.Time { return now }
+	r.health.now = func() time.Time { return now }
+	r.health.limit = 30 * time.Minute
+	r.health.mark(&r.health.loopAt)
+
+	if alive, summary := r.Alive(); !alive {
+		t.Fatalf("a loop that just turned must be alive: %s", summary)
+	}
+
+	now = now.Add(29 * time.Minute)
+	if alive, _ := r.Alive(); !alive {
+		t.Error("a long but legitimate iteration (big collection pass, trivy DB download) must not be killed")
+	}
+
+	now = now.Add(2 * time.Minute)
+	alive, summary := r.Alive()
+	if alive {
+		t.Error("a loop stuck past the liveness limit must fail the probe")
+	}
+	if !strings.Contains(summary, "last scan") {
+		t.Errorf("the probe body must help an operator diagnose; got %q", summary)
+	}
+
+	// A push failure is not a wedge: restarting the pod cannot fix an unreachable API, and the
+	// design is explicitly not to crash-loop through one.
+	r.scanAndPush(context.Background())
+	r.health.mark(&r.health.loopAt)
+	if alive, summary := r.Alive(); !alive {
+		t.Errorf("the loop turned, so it is alive: %s", summary)
+	}
+}
+
 // TestScanAndPushLogsProgress: a healthy scan+push emits a start, a scan-complete (with timing so
 // the trivy DB-download latency is visible) and a delivery line — so an operator can tell "working"
 // from "hung" without opening the dashboard.

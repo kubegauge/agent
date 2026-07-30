@@ -2,8 +2,9 @@
 
 Installs the KubeGauge in-cluster agent: a **read-only, outbound-only** scanner that snapshots
 your cluster through the API server, runs the compliance checks, and pushes the raw results to
-the KubeGauge API. No inbound connections, no Service, no exposed ports (only a pod-local
-`/healthz` for probes). What leaves the cluster is documented field by field in
+the KubeGauge API. No Service, no exposed API — the only listener is `/healthz` on 8787 for
+kubelet probes, and `networkPolicy.enabled=true` (chart 0.16.0+) denies all ingress to it.
+What leaves the cluster is documented field by field in
 [`docs/what-leaves-your-cluster.md`](../../docs/what-leaves-your-cluster.md) and formalized by
 [`schema/agent-report.v1.schema.json`](../../schema/agent-report.v1.schema.json).
 
@@ -43,6 +44,7 @@ and `existingSecret` do not exist in the published 0.15.0 chart; setting them th
 | `trivy.enabled` | `true` | Image vulnerability scanning (KG-SU-003) |
 | `resources` | requests 100m/128Mi/512Mi, limits 1/1Gi/3Gi | Hardened-by-default pod sizing (cpu/memory/ephemeral-storage) |
 | `cacheSizeLimit` / `tmpSizeLimit` | `2Gi` / `1Gi` | `sizeLimit` on the two emptyDir volumes — trivy's CVE database lives in the first |
+| `networkPolicy.enabled` | `false` | Deny all ingress to the agent pod (opt-in: kubelet probes come from the node, and CNIs differ on whether policy applies to them) |
 
 ## Large clusters, and what happens when a read fails
 

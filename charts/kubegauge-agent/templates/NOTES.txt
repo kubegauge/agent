@@ -1,7 +1,9 @@
 KubeGauge agent installed ({{ include "kubegauge-agent.fullname" . }}, namespace {{ .Release.Namespace }}).
 
 The agent is OUTBOUND-ONLY: it pushes scan reports to {{ .Values.ingestUrl }}
-and polls the same API for on-demand scan commands. Nothing connects INTO it.
+and polls the same API for on-demand scan commands. It exposes no Service and no API — the only
+listener is a pod-local /healthz on 8787 for kubelet probes, which any pod in the cluster can
+reach unless you deny it{{ if .Values.networkPolicy.enabled }} (you enabled networkPolicy, so it is denied){{ else }} (set networkPolicy.enabled=true){{ end }}.
 
 Watch it work:
 
