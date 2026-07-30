@@ -11,7 +11,13 @@
 //   - Every non-system workload gets one egress candidate to the internet node on 443/TCP — the
 //     canonical "can this thing reach out?" edge.
 //
-// This keeps the candidate set meaningful and bounded instead of O(n²) arbitrary workload pairs.
+// Deriving candidates from Services is narrower than pairing arbitrary workloads, but it is NOT
+// bounded: the east-west set is services x backends x ports x every non-system workload, which on
+// a cluster with a thousand Services and a few thousand workloads is millions of flows — each one
+// evaluated, retained, serialized and gzipped, against a 1Gi pod limit and a 5 MB server-side
+// payload cap. The package used to claim otherwise; MaxFlows below is what actually bounds it.
+// Emission is ordered by value so a truncated graph still tells the exposure story: internet
+// ingress first, then each workload's egress candidate, then east-west.
 package report
 
 import (
@@ -34,6 +40,14 @@ const (
 	// internetEgressPort: the single representative egress candidate per workload (HTTPS).
 	internetEgressPort = 443
 )
+
+// MaxFlows caps how many flows one report carries. The east-west candidate set grows with
+// services x backends x ports x workloads, so on a large cluster it is effectively unbounded: left
+// alone it OOMs the agent against the chart's 1Gi limit, or produces a payload the API rejects
+// (5 MB decoded), which means that cluster never reports at all. 5k flows is a graph no human
+// reads to the end and roughly 600 KB of JSON. Beyond it the graph is a sample, in priority order
+// (see the package doc): the agent logs when a report comes back at the cap.
+const MaxFlows = 5000
 
 // networkSystemNamespaces mirrors internal/checks's systemNamespaces (an import here would be a
 // cycle: checks imports report). Workloads in these namespaces are never flow SOURCES; see the
@@ -93,13 +107,19 @@ func BuildNetwork(snap *snapshot.Snapshot) ([]NetworkNode, []NetworkFlow) {
 	flows := []NetworkFlow{}
 	internetPeer := netpoleval.Peer{IP: internetProxyIP}
 
-	addFlow := func(fromID string, from netpoleval.Peer, toID string, to netpoleval.Peer, port int32, proto corev1.Protocol) {
+	// addFlow reports whether there is budget left to keep going: every caller must stop when it
+	// returns false, or the loops would keep paying the O(services x workloads) cost for flows
+	// nobody will emit.
+	addFlow := func(fromID string, from netpoleval.Peer, toID string, to netpoleval.Peer, port int32, proto corev1.Protocol) bool {
+		if len(flows) >= MaxFlows {
+			return false
+		}
 		if fromID == toID {
-			return
+			return true
 		}
 		key := flowKey{from: fromID, to: toID, port: port, proto: proto}
 		if seen[key] {
-			return
+			return true
 		}
 		seen[key] = true
 
@@ -116,40 +136,37 @@ func BuildNetwork(snap *snapshot.Snapshot) ([]NetworkNode, []NetworkFlow) {
 		flows = append(flows, NetworkFlow{From: fromID, To: toID, Port: int(port), Protocol: string(proto), Verdict: verdict, Policy: policy})
 		nodeSeen[fromID] = true
 		nodeSeen[toID] = true
+		return len(flows) < MaxFlows
 	}
 
-	for _, svc := range snap.Services {
-		if len(svc.Spec.Selector) == 0 {
-			// Selector-less Services (manual Endpoints, e.g. default/kubernetes) have no pod
-			// backends to point a flow at.
+	endpoints := serviceEndpoints(snap.Services, workloads)
+
+	// Priority 1: what the internet can reach. A truncated graph that lost these would hide the
+	// finding that matters most.
+	for _, ep := range endpoints {
+		if !ep.exposed {
 			continue
 		}
-		exposed := svc.Spec.Type == corev1.ServiceTypeNodePort || svc.Spec.Type == corev1.ServiceTypeLoadBalancer
-		for _, backend := range workloads {
-			if backend.src.Namespace != svc.Namespace || !selectorCovers(svc.Spec.Selector, backend.src.Labels) {
-				continue
-			}
-			for _, sp := range svc.Spec.Ports {
-				proto := sp.Protocol
-				if proto == "" {
-					proto = corev1.ProtocolTCP
-				}
-				port, ok := resolveTargetPort(sp, proto, backend.info.Ports)
-				if !ok {
-					continue
-				}
-				for _, c := range clients {
-					addFlow(c.id, netpoleval.Peer{Pod: c.info}, backend.id, netpoleval.Peer{Pod: backend.info}, port, proto)
-				}
-				if exposed {
-					addFlow(internetNodeID, internetPeer, backend.id, netpoleval.Peer{Pod: backend.info}, port, proto)
-				}
-			}
+		if !addFlow(internetNodeID, internetPeer, ep.backend.id, netpoleval.Peer{Pod: ep.backend.info}, ep.port, ep.proto) {
+			break
 		}
 	}
 
+	// Priority 2: one egress candidate per workload — "can this thing reach out?".
 	for _, c := range clients {
-		addFlow(c.id, netpoleval.Peer{Pod: c.info}, internetNodeID, internetPeer, internetEgressPort, corev1.ProtocolTCP)
+		if !addFlow(c.id, netpoleval.Peer{Pod: c.info}, internetNodeID, internetPeer, internetEgressPort, corev1.ProtocolTCP) {
+			break
+		}
+	}
+
+	// Priority 3: east-west. This is the set that explodes, so it spends whatever budget is left.
+eastWest:
+	for _, ep := range endpoints {
+		for _, c := range clients {
+			if !addFlow(c.id, netpoleval.Peer{Pod: c.info}, ep.backend.id, netpoleval.Peer{Pod: ep.backend.info}, ep.port, ep.proto) {
+				break eastWest
+			}
+		}
 	}
 
 	nodes := []NetworkNode{}
@@ -177,6 +194,57 @@ func BuildNetwork(snap *snapshot.Snapshot) ([]NetworkNode, []NetworkFlow) {
 		return a.Protocol < b.Protocol
 	})
 	return nodes, flows
+}
+
+// svcEndpoint is one resolved (Service backend, port) pair: the destination side of a flow
+// candidate, computed once so the two phases that need it do not re-run the
+// O(services x workloads) selector matching.
+type svcEndpoint struct {
+	backend netWorkload
+	port    int32
+	proto   corev1.Protocol
+	exposed bool // NodePort/LoadBalancer: also reachable from the internet node
+}
+
+// serviceEndpoints resolves every Service to its backends and target ports, in a deterministic
+// order (services sorted by namespace/name) so truncation cuts the same candidates on every scan
+// of an unchanged cluster.
+func serviceEndpoints(services []corev1.Service, workloads []netWorkload) []svcEndpoint {
+	sorted := make([]corev1.Service, len(services))
+	copy(sorted, services)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Namespace != sorted[j].Namespace {
+			return sorted[i].Namespace < sorted[j].Namespace
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	var out []svcEndpoint
+	for _, svc := range sorted {
+		if len(svc.Spec.Selector) == 0 {
+			// Selector-less Services (manual Endpoints, e.g. default/kubernetes) have no pod
+			// backends to point a flow at.
+			continue
+		}
+		exposed := svc.Spec.Type == corev1.ServiceTypeNodePort || svc.Spec.Type == corev1.ServiceTypeLoadBalancer
+		for _, backend := range workloads {
+			if backend.src.Namespace != svc.Namespace || !selectorCovers(svc.Spec.Selector, backend.src.Labels) {
+				continue
+			}
+			for _, sp := range svc.Spec.Ports {
+				proto := sp.Protocol
+				if proto == "" {
+					proto = corev1.ProtocolTCP
+				}
+				port, ok := resolveTargetPort(sp, proto, backend.info.Ports)
+				if !ok {
+					continue
+				}
+				out = append(out, svcEndpoint{backend: backend, port: port, proto: proto, exposed: exposed})
+			}
+		}
+	}
+	return out
 }
 
 // representativePodIP resolves the IP a workload's packets actually carry, so netpoleval can

@@ -4,6 +4,7 @@
 package report
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -588,4 +589,49 @@ func TestBuildNetworkPodIPResolution(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestBuildNetworkCapsFlows: on a cluster where the east-west candidate set explodes, the graph
+// must stop at MaxFlows instead of growing until the agent OOMs or the API rejects the payload —
+// and the flows that survive must still include the exposure story (internet ingress and each
+// workload's egress candidate), which is why emission is ordered.
+func TestBuildNetworkCapsFlows(t *testing.T) {
+	const workloads = 100 // 100 clients x 100 endpoints = 10k east-west candidates
+
+	snap := &snapshot.Snapshot{Namespaces: []corev1.Namespace{nwNamespace("apps")}}
+	for i := range workloads {
+		name := fmt.Sprintf("svc-%03d", i)
+		labels := map[string]string{"app": name}
+		snap.Deployments = append(snap.Deployments, nwDeployment("apps", name, labels, nwContainerPort("http", 8080, corev1.ProtocolTCP)))
+		svcType := corev1.ServiceTypeClusterIP
+		if i == 0 {
+			svcType = corev1.ServiceTypeLoadBalancer
+		}
+		snap.Services = append(snap.Services, nwService("apps", name, labels, svcType, nwSvcPort(80, 8080, corev1.ProtocolTCP)))
+	}
+
+	_, flows := BuildNetwork(snap)
+
+	if len(flows) > MaxFlows {
+		t.Fatalf("BuildNetwork emitted %d flows, want at most MaxFlows=%d", len(flows), MaxFlows)
+	}
+	if len(flows) < MaxFlows {
+		t.Fatalf("fixture no longer exceeds the cap (%d flows) — it must, or this test proves nothing", len(flows))
+	}
+
+	var ingress, egress int
+	for _, f := range flows {
+		switch {
+		case f.From == internetNodeID:
+			ingress++
+		case f.To == internetNodeID:
+			egress++
+		}
+	}
+	if ingress == 0 {
+		t.Error("truncation dropped the internet ingress flows, the highest-value part of the graph")
+	}
+	if egress != workloads {
+		t.Errorf("kept %d egress candidates, want one per workload (%d)", egress, workloads)
+	}
 }

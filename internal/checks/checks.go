@@ -23,7 +23,7 @@ import (
 // command, remediation, docs, framework refs — keyed by the same check id). Namespaces and
 // AffectedResources must always be non-nil (the wire contract forbids null here, carried
 // through to wire.CheckResult); every concrete Check below is built to guarantee this, and Run
-// also normalizes defensively (nonNilStrings).
+// also normalizes defensively (capEvidence, which doubles as the payload-size guard).
 type Result struct {
 	Status            string
 	Namespaces        []string
@@ -130,6 +130,25 @@ var resourceDependencies = map[string][]string{
 // "empty", it is unknown, so it degrades to empty rather than reporting a clean cluster.
 var rbacBindingResources = []string{"roles", "clusterroles", "rolebindings", "clusterrolebindings"}
 
+// maxEvidenceEntries caps the namespaces/affectedResources one check carries. A check that fails
+// on every workload of a 50k-workload cluster would otherwise emit 50k strings, and the report as
+// a whole would blow past the 5 MB the API accepts — which does not degrade the report, it
+// rejects it, so that cluster never reports at all. The verdict is the status; the list is
+// evidence, and a truncated sample of it beats a push that is refused forever.
+const maxEvidenceEntries = 1000
+
+// capEvidence trims an evidence list to maxEvidenceEntries, never returning nil (the wire contract
+// forbids null here).
+func capEvidence(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	if len(s) > maxEvidenceEntries {
+		return s[:maxEvidenceEntries]
+	}
+	return s
+}
+
 // unevaluableChecks returns the check ids whose inputs are missing from this snapshot.
 func unevaluableChecks(snap *snapshot.Snapshot) map[string]bool {
 	out := map[string]bool{}
@@ -161,8 +180,8 @@ func Run(snap *snapshot.Snapshot) []wire.CheckResult {
 		out = append(out, wire.CheckResult{
 			ID:                c.ID(),
 			Status:            res.Status,
-			Namespaces:        nonNilStrings(res.Namespaces),
-			AffectedResources: nonNilStrings(res.AffectedResources),
+			Namespaces:        capEvidence(res.Namespaces),
+			AffectedResources: capEvidence(res.AffectedResources),
 			ImageFindings:     res.ImageFindings,
 		})
 	}

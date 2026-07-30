@@ -16,6 +16,7 @@ import (
 	"github.com/kubegauge/agent/internal/checks"
 	"github.com/kubegauge/agent/internal/kube"
 	"github.com/kubegauge/agent/internal/push"
+	"github.com/kubegauge/agent/internal/report"
 	"github.com/kubegauge/agent/internal/snapshot"
 	"github.com/kubegauge/agent/internal/trivy"
 	"github.com/kubegauge/agent/internal/wire"
@@ -88,7 +89,11 @@ func main() {
 			}
 			snap.ImageVulns = scanner.ScanSnapshot(ctx, snap)
 		}
-		return wire.Build(snap, *clusterName, version, time.Now(), checks.Run(snap), checks.RbacFindings(snap)), nil
+		rpt := wire.Build(snap, *clusterName, version, time.Now(), checks.Run(snap), checks.RbacFindings(snap))
+		if len(rpt.Network.Flows) >= report.MaxFlows {
+			fmt.Fprintf(os.Stderr, "kubegauge-agent: network graph truncated at %d flows — it is a sample of this cluster's candidates, in priority order (internet exposure first)\n", report.MaxFlows)
+		}
+		return rpt, nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
