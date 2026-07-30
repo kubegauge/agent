@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -159,7 +160,14 @@ func (s *Scanner) scanOne(ctx context.Context, ref string) snapshot.ImageScanRes
 	ctx, cancel := context.WithTimeout(ctx, perImageBudget)
 	defer cancel()
 
-	raw, err := s.runner(ctx, s.bin, "image", "--format", "json", "--quiet", ref)
+	if err := validateImageRef(ref); err != nil {
+		return snapshot.ImageScanResult{ScanError: truncate(err.Error(), scanErrorLimit)}
+	}
+
+	// "--" ends flag parsing: the reference comes from a pod's image field, which anyone able to
+	// create a pod controls, so without it a value like "--server=http://attacker/" would be read
+	// by trivy as a flag rather than as an image to scan.
+	raw, err := s.runner(ctx, s.bin, "image", "--format", "json", "--quiet", "--", ref)
 	if err != nil {
 		return snapshot.ImageScanResult{ScanError: truncate(err.Error(), scanErrorLimit)}
 	}
@@ -168,6 +176,31 @@ func (s *Scanner) scanOne(ctx context.Context, ref string) snapshot.ImageScanRes
 		return snapshot.ImageScanResult{ScanError: "trivy JSON parse: " + truncate(err.Error(), scanErrorLimit)}
 	}
 	return res
+}
+
+// imageRefPattern is a conservative superset of the OCI/Docker reference grammar: registry host
+// (with an optional port), path components, a tag and/or a digest. It exists to keep hostile input
+// out of an exec argument list, not to fully parse references, so it is deliberately stricter than
+// the spec — anything it rejects becomes a per-image ScanError the operator can see.
+var imageRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`)
+
+// maxImageRefLen bounds the argument: no real reference approaches it.
+const maxImageRefLen = 512
+
+// validateImageRef rejects an image reference the agent must not hand to a subprocess. Pod specs
+// are attacker-controlled input for anyone with pod-create, so a reference that could be read as a
+// flag ("-…"), carry shell/whitespace characters, or run to an absurd length never reaches exec —
+// on top of the "--" separator scanOne passes.
+func validateImageRef(ref string) error {
+	switch {
+	case ref == "":
+		return fmt.Errorf("empty image reference")
+	case len(ref) > maxImageRefLen:
+		return fmt.Errorf("image reference longer than %d characters, refusing to scan it", maxImageRefLen)
+	case !imageRefPattern.MatchString(ref):
+		return fmt.Errorf("image reference %q is not a valid reference, refusing to scan it", truncate(ref, 80))
+	}
+	return nil
 }
 
 // collectImageRefs gathers every container and initContainer image of non-system workloads,

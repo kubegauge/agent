@@ -188,3 +188,71 @@ func TestNewScannerNilWhenBinaryMissing(t *testing.T) {
 		t.Error("sem trivy no PATH, NewScanner deve retornar nil")
 	}
 }
+
+// TestScanOneRefusesHostileImageRefs: a pod's image field is attacker-controlled for anyone with
+// pod-create. Nothing that could be read as a flag (or that is not a reference at all) may reach
+// the trivy argument list.
+func TestScanOneRefusesHostileImageRefs(t *testing.T) {
+	hostile := []string{
+		"--server=http://attacker.example/",
+		"-q",
+		"nginx:1.0 --server=http://attacker.example/",
+		"nginx:1.0\n--server=http://attacker.example/",
+		"nginx:1.0;curl http://attacker.example",
+		"",
+		strings.Repeat("a", maxImageRefLen+1),
+	}
+
+	for _, ref := range hostile {
+		t.Run(ref, func(t *testing.T) {
+			executed := false
+			s := testScanner(func(context.Context, string, ...string) ([]byte, error) {
+				executed = true
+				return nil, nil
+			}, "")
+
+			res := s.scanOne(context.Background(), ref)
+			if executed {
+				t.Errorf("scanOne executed trivy for hostile reference %q", ref)
+			}
+			if res.ScanError == "" {
+				t.Errorf("scanOne(%q) reported no ScanError", ref)
+			}
+		})
+	}
+}
+
+// TestScanOnePassesEndOfFlagsSeparator: the "--" is the second half of the defense, so it stays
+// even for references that pass validation.
+func TestScanOnePassesEndOfFlagsSeparator(t *testing.T) {
+	var got []string
+	s := testScanner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		got = args
+		return []byte(`{"Results":[]}`), nil
+	}, "")
+
+	s.scanOne(context.Background(), "ghcr.io/kubegauge/agent:v0.16.0")
+
+	if len(got) < 2 || got[len(got)-2] != "--" {
+		t.Errorf("trivy args = %v, want the image reference preceded by \"--\"", got)
+	}
+}
+
+// TestValidateImageRefAcceptsRealReferences guards against the pattern being tightened into
+// something that rejects references clusters really run.
+func TestValidateImageRefAcceptsRealReferences(t *testing.T) {
+	valid := []string{
+		"nginx",
+		"nginx:1.25.3",
+		"library/nginx:latest",
+		"ghcr.io/kubegauge/agent:v0.16.0",
+		"registry.example.com:5000/team/app:1.0",
+		"gcr.io/distroless/static-debian12@sha256:6d1e0f8b1c1b0b7f7a3f2a1e0c9d8b7a6f5e4d3c2b1a0987654321fedcba9876",
+		"quay.io/prometheus/node-exporter:v1.8.2",
+	}
+	for _, ref := range valid {
+		if err := validateImageRef(ref); err != nil {
+			t.Errorf("validateImageRef(%q) = %v, want nil", ref, err)
+		}
+	}
+}
