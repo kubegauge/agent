@@ -93,6 +93,37 @@ func TestClusterAdminBindingCheck(t *testing.T) {
 			}}},
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
+		{
+			name: "EKS addon-manager binding warns instead of failing",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"}),
+			}},
+			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
+		},
+		{
+			name: "a provider binding name carrying an unexpected extra subject still fails",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("eks:addon-cluster-admin",
+					rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
+					rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "jenkins", Namespace: "ci-cd"},
+				),
+			}},
+			want: Result{Status: "fail", Namespaces: []string{"ci-cd"}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
+		},
+		{
+			name: "the AKS user granted through a differently-named custom binding still fails",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("ops-shortcut", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "clusterAdmin"}),
+			}},
+			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/ops-shortcut"}},
+		},
+		{
+			name: "a Group subject sharing the EKS user name does not get the downgrade",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "eks:addon-manager"}),
+			}},
+			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -297,7 +328,7 @@ func TestRbacFindings(t *testing.T) {
 		if got[0].Risk != "medium" {
 			t.Errorf("Risk = %q, want medium", got[0].Risk)
 		}
-		if got[0].Reason != knownDistroDefaultBindingReason {
+		if got[0].Reason != distroDefaultBindingReason("kubeadm:cluster-admins") {
 			t.Errorf("Reason = %q, want the known-default binding reason", got[0].Reason)
 		}
 	})

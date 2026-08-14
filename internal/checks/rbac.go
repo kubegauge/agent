@@ -102,13 +102,22 @@ func ruleGrantsSecretsRead(rule rbacv1.PolicyRule) bool {
 	return false
 }
 
+// distroDefaultSubject is the exact subject a knownDistroDefaultBindings entry is expected to
+// carry. Both fields must match: the kind matters because the distributions differ — kubeadm binds
+// a Group, while EKS binds a User — and a Group that merely shares a User's name is a different
+// identity that must not inherit the downgrade.
+type distroDefaultSubject struct {
+	Kind string
+	Name string
+}
+
 // knownDistroDefaultBindings documents ClusterRoleBindings that grant cluster-admin as an expected
 // part of a Kubernetes distribution's own bootstrap process — not something an operator
-// configured — keyed by the binding's exact name and mapped to the exact Group subject name that
-// binding is expected to carry. clusterAdminBindingCheck.Run and RbacFindings (below) both
-// downgrade a binding matching this from fail/critical to warn/medium: still worth surfacing
-// (group membership can be widened or abused later), but not reported as a misconfiguration the
-// way an arbitrary custom binding is.
+// configured — keyed by the binding's exact name and mapped to every subject that binding is
+// expected to carry. clusterAdminBindingCheck.Run and RbacFindings (below) both downgrade a
+// binding matching this from fail/critical to warn/medium: still worth surfacing (membership can
+// be widened or abused later), but not reported as a misconfiguration the way an arbitrary custom
+// binding is.
 //
 //   - "kubeadm:cluster-admins": since kubeadm v1.29, `kubeadm init`/`join` no longer grants
 //     cluster-admin directly to a "kubernetes-admin" User; it instead creates this
@@ -116,37 +125,69 @@ func ruleGrantsSecretsRead(rule rbacv1.PolicyRule) bool {
 //     certificate with that Group as its certificate O= (organization). It ships, unconditionally,
 //     on every kubeadm-bootstrapped cluster from that version on — the kubeadm equivalent of the
 //     cluster-admin -> system:masters default this check already excludes outright.
-var knownDistroDefaultBindings = map[string]string{
-	"kubeadm:cluster-admins": "kubeadm:cluster-admins",
+//   - "eks:addon-cluster-admin": created by Amazon EKS to let its add-on manager reconcile
+//     cluster resources. The subject is a User with no system: prefix, so without this entry the
+//     check reports a critical misconfiguration on every EKS cluster.
+var knownDistroDefaultBindings = map[string][]distroDefaultSubject{
+	"kubeadm:cluster-admins": {
+		{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"},
+	},
+	"eks:addon-cluster-admin": {
+		{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
+	},
 }
 
-// knownDistroDefaultBindingReason is the RbacFinding.Reason used whenever
-// isKnownDistroDefaultBinding matches, in the same audience-facing voice as this file's other
-// Reason strings.
-const knownDistroDefaultBindingReason = "Default binding created by kubeadm (>=1.29), granting cluster-admin to the kubeadm:cluster-admins group used by the admin.conf certificate — expected on kubeadm clusters, not an operator misconfiguration. Still worth auditing who has access to that group/certificate."
+// distroDefaultBindingReasons is the RbacFinding.Reason used per binding, in the same
+// audience-facing voice as this file's other Reason strings. The wording is specific to each
+// distribution's own facts: EKS does NOT put a deleted binding back — AWS instructs the operator
+// to re-apply it by hand — so the Reason says so instead of implying the object heals itself.
+var distroDefaultBindingReasons = map[string]string{
+	"kubeadm:cluster-admins":  "Default binding created by kubeadm (>=1.29), granting cluster-admin to the kubeadm:cluster-admins group used by the admin.conf certificate — expected on kubeadm clusters, not an operator misconfiguration. Still worth auditing who has access to that group/certificate.",
+	"eks:addon-cluster-admin": "Default binding created by Amazon EKS for its add-on manager — expected on every EKS cluster, not an operator misconfiguration. Deleting it breaks add-on management and EKS does not recreate it. Still worth auditing who can assume that identity.",
+}
+
+// distroDefaultBindingReason returns the Reason for a binding already known to match
+// knownDistroDefaultBindings, falling back to a generic sentence so an entry added to the map
+// without a matching reason still produces a usable finding rather than an empty string.
+func distroDefaultBindingReason(bindingName string) string {
+	if r, ok := distroDefaultBindingReasons[bindingName]; ok {
+		return r
+	}
+	return "Default binding created by the Kubernetes distribution itself — expected on this cluster, not an operator misconfiguration. Still worth auditing who can use that identity."
+}
 
 // isKnownDistroDefaultBinding reports whether crb — together with its already-computed set of
 // non-system ("offending") subjects — matches a knownDistroDefaultBindings entry exactly. Both the
 // binding's name AND every offending subject must match:
 //
-//   - requiring every offending subject to be the expected Group (not just one of them) means a
-//     binding that happens to share the well-known name but was edited to also grant, say, an
-//     arbitrary User isn't given the downgrade;
-//   - requiring the binding's own name to match (not just the Group name) means a differently-
-//     named, custom binding that happens to grant the same well-known Group is still treated as a
-//     regular fail/critical finding — see rbac_test.go's "same group via another custom binding"
-//     case.
+//   - requiring every offending subject to be one of the expected ones (not just one of them)
+//     means a binding that happens to share the well-known name but was edited to also grant, say,
+//     an arbitrary ServiceAccount isn't given the downgrade;
+//   - requiring the binding's own name to match (not just the subject) means a differently-named,
+//     custom binding that happens to grant the same well-known identity is still treated as a
+//     regular fail/critical finding — see rbac_test.go's "differently-named custom binding" cases.
 func isKnownDistroDefaultBinding(crb rbacv1.ClusterRoleBinding, offendingSubjects []rbacv1.Subject) bool {
-	wantGroup, ok := knownDistroDefaultBindings[crb.Name]
+	want, ok := knownDistroDefaultBindings[crb.Name]
 	if !ok || len(offendingSubjects) == 0 {
 		return false
 	}
 	for _, s := range offendingSubjects {
-		if s.Kind != rbacv1.GroupKind || s.Name != wantGroup {
+		if !isExpectedDistroDefaultSubject(want, s) {
 			return false
 		}
 	}
 	return true
+}
+
+// isExpectedDistroDefaultSubject reports whether s matches any of the subjects a known
+// distribution-default binding is expected to carry, comparing kind and name together.
+func isExpectedDistroDefaultSubject(want []distroDefaultSubject, s rbacv1.Subject) bool {
+	for _, w := range want {
+		if w.Kind == s.Kind && w.Name == s.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- KG-RB-001: cluster-admin bindings to non-system subjects ---------------------------------
@@ -693,7 +734,7 @@ func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
 			}
 			risk, reason := "critical", "Grants cluster-admin (full control of the cluster) to a subject outside the expected system identities."
 			if isKnownDistroDefaultBinding(crb, offending) {
-				risk, reason = "medium", knownDistroDefaultBindingReason
+				risk, reason = "medium", distroDefaultBindingReason(crb.Name)
 			}
 			for _, subj := range offending {
 				drafts = append(drafts, report.RbacFinding{
