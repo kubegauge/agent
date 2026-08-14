@@ -282,37 +282,50 @@ type imageSignatureVerificationCheck struct{}
 
 func (imageSignatureVerificationCheck) ID() string { return "KG-SU-004" }
 
-// Run inspects the cluster's ValidatingWebhookConfigurations (both the configuration's own name
-// and each webhook entry's name, case-insensitively) for a signature-verification admission
-// stack:
+// Run inspects two independent sources for a signature-verification admission stack:
 //
-//   - "sigstore" (policy-controller registers policy.sigstore.dev) or "connaisseur": pass —
-//     dedicated signature verifiers, whose webhook being registered IS the enforcement;
-//   - "kyverno": warn, listing the matched configurations — Kyverno's webhooks are policy-driven
-//     and look identical whether or not any verifyImages rule exists, so its presence alone
-//     cannot confirm signature verification from the API objects this snapshot sees. The
-//     catalog's auditCommand shows how to confirm manually (ClusterPolicies with verifyImages);
-//   - otherwise: fail — no recognized signature-verification admission stack in the cluster.
+//   - the cluster's ValidatingWebhookConfigurations (both the configuration's own name and each
+//     webhook entry's name, case-insensitively), where "sigstore" (policy-controller registers
+//     policy.sigstore.dev) or "connaisseur" mean pass — dedicated signature verifiers, whose
+//     webhook being registered IS the enforcement — and "kyverno" means warn, because Kyverno's
+//     webhooks look identical whether or not any verifyImages rule exists;
+//   - the kube-apiserver static pod's --enable-admission-plugins, where ImagePolicyWebhook means
+//     warn. It is the mechanism CIS 5.5.1 is literally named after, and it never registers a
+//     ValidatingWebhookConfiguration, so matching webhook names alone reported a hard fail on a
+//     cluster that does enforce provenance. It is warn rather than pass for the same reason
+//     Kyverno is: the plugin's backend lives in --admission-control-config-file, a file on the
+//     node this snapshot cannot read, so the plugin being enabled does not prove the enforcement
+//     is actually configured.
+//
+// Anything else: fail — no recognized signature-verification admission stack in the cluster.
 //
 // Unlike KG-CP-* there is no managed-cluster degradation: webhook configurations are ordinary,
-// cluster-scoped API objects, fully visible on EKS/GKE/AKS too.
+// cluster-scoped API objects, fully visible on EKS/GKE/AKS. The apiserver source simply
+// contributes nothing there, since managed control planes expose no static pod — which is also
+// the only place ImagePolicyWebhook is realistically configurable, as it needs a file on the API
+// server.
 func (imageSignatureVerificationCheck) Run(snap *snapshot.Snapshot) Result {
 	dedicated := false
-	var kyverno []string
+	var partial []string
 	for _, cfg := range snap.ValidatingWebhookConfigs {
 		switch {
 		case webhookConfigMatches(cfg, "sigstore"), webhookConfigMatches(cfg, "connaisseur"):
 			dedicated = true
 		case webhookConfigMatches(cfg, "kyverno"):
-			kyverno = append(kyverno, "validatingwebhookconfiguration/"+cfg.Name)
+			partial = append(partial, "validatingwebhookconfiguration/"+cfg.Name)
+		}
+	}
+	for _, p := range controlPlanePods(snap, apiserverNamePrefix, apiserverComponent) {
+		if commaListContains(staticPodFlags(p)["enable-admission-plugins"], "ImagePolicyWebhook") {
+			partial = append(partial, "pod/kube-system/"+p.Name)
 		}
 	}
 	if dedicated {
 		return Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}}
 	}
-	if len(kyverno) > 0 {
-		sort.Strings(kyverno)
-		return Result{Status: "warn", Namespaces: []string{}, AffectedResources: kyverno}
+	if len(partial) > 0 {
+		sort.Strings(partial)
+		return Result{Status: "warn", Namespaces: []string{}, AffectedResources: partial}
 	}
 	return Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{}}
 }

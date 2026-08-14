@@ -322,6 +322,71 @@ func TestImageSignatureVerificationCheck(t *testing.T) {
 			}},
 			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{}},
 		},
+		{
+			name: "ImagePolicyWebhook enabled on the apiserver becomes warn, not fail",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{
+				staticPod("kube-apiserver-cp0", apiserverLabels(), []string{
+					"kube-apiserver",
+					"--enable-admission-plugins=NodeRestriction,ImagePolicyWebhook",
+				}),
+			}},
+			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{
+				"pod/kube-system/kube-apiserver-cp0",
+			}},
+		},
+		{
+			name: "a plugin list without ImagePolicyWebhook still fails",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{
+				staticPod("kube-apiserver-cp0", apiserverLabels(), []string{
+					"kube-apiserver",
+					"--enable-admission-plugins=NodeRestriction,AlwaysPullImages",
+				}),
+			}},
+			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a dedicated verifier still wins over ImagePolicyWebhook",
+			snap: &snapshot.Snapshot{
+				Pods: []corev1.Pod{
+					staticPod("kube-apiserver-cp0", apiserverLabels(), []string{
+						"kube-apiserver",
+						"--enable-admission-plugins=ImagePolicyWebhook",
+					}),
+				},
+				ValidatingWebhookConfigs: []admissionregistrationv1.ValidatingWebhookConfiguration{
+					signatureWebhookCfg("policy.sigstore.dev", "policy.sigstore.dev"),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "kyverno and ImagePolicyWebhook are listed together, sorted",
+			snap: &snapshot.Snapshot{
+				Pods: []corev1.Pod{
+					staticPod("kube-apiserver-cp0", apiserverLabels(), []string{
+						"kube-apiserver",
+						"--enable-admission-plugins=ImagePolicyWebhook",
+					}),
+				},
+				ValidatingWebhookConfigs: []admissionregistrationv1.ValidatingWebhookConfiguration{
+					signatureWebhookCfg("kyverno-resource-validating-webhook-cfg", "validate.kyverno.svc-fail"),
+				},
+			},
+			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{
+				"pod/kube-system/kube-apiserver-cp0",
+				"validatingwebhookconfiguration/kyverno-resource-validating-webhook-cfg",
+			}},
+		},
+		{
+			name: "a plugin name that merely contains ImagePolicyWebhook does not match",
+			snap: &snapshot.Snapshot{Pods: []corev1.Pod{
+				staticPod("kube-apiserver-cp0", apiserverLabels(), []string{
+					"kube-apiserver",
+					"--enable-admission-plugins=ImagePolicyWebhookExtra",
+				}),
+			}},
+			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{}},
+		},
 	}
 
 	for _, tt := range tests {
