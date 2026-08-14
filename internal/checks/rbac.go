@@ -111,30 +111,71 @@ type distroDefaultSubject struct {
 	Name string
 }
 
+// distroDefaultBinding is a single knownDistroDefaultBindings entry: the subjects a distribution's
+// own default binding is expected to carry, plus which detected distribution(s) it's expected on.
+type distroDefaultBinding struct {
+	Subjects []distroDefaultSubject
+	// Distros lists the detectedDistribution() values this binding is expected on. Empty means "any
+	// distribution" — used only for kubeadm, see the field's use below: DetectDistribution (in
+	// report/cluster.go) checks a node's aws:// providerID BEFORE it checks for the kubeadm
+	// ConfigMap, so a plain kubeadm cluster running on bare EC2 instances (no EKS involved at all)
+	// detects as "eks". Gating the kubeadm entry to Distros: []string{"kubeadm"} would strip the
+	// downgrade from exactly that real cluster shape and regress it to critical — see
+	// rbac_test.go's "kubeadm binding still downgrades on a cluster that detects as eks" case.
+	Distros []string
+}
+
 // knownDistroDefaultBindings documents ClusterRoleBindings that grant cluster-admin as an expected
 // part of a Kubernetes distribution's own bootstrap process — not something an operator
-// configured — keyed by the binding's exact name and mapped to every subject that binding is
-// expected to carry. clusterAdminBindingCheck.Run and RbacFindings (below) both downgrade a
-// binding matching this from fail/critical to warn/medium: still worth surfacing (membership can
-// be widened or abused later), but not reported as a misconfiguration the way an arbitrary custom
-// binding is.
+// configured — keyed by the binding's exact name. clusterAdminBindingCheck.Run and RbacFindings
+// (below) both downgrade a binding matching this from fail/critical to warn/medium: still worth
+// surfacing (membership can be widened or abused later), but not reported as a misconfiguration
+// the way an arbitrary custom binding is.
+//
+// Matching a name (and subject) alone is not enough: an attacker with bind/escalate rights — or
+// any cluster that simply isn't the provider in question — could create a ClusterRoleBinding named
+// "eks:addon-cluster-admin" bound to a User named "eks:addon-manager" on a plain kubeadm or GKE
+// cluster and inherit both the downgrade AND a Reason claiming EKS provenance it doesn't have.
+// Distros closes that: the binding only downgrades when detectedDistribution(snap) is one this
+// entry allows.
 //
 //   - "kubeadm:cluster-admins": since kubeadm v1.29, `kubeadm init`/`join` no longer grants
 //     cluster-admin directly to a "kubernetes-admin" User; it instead creates this
 //     ClusterRoleBinding against a "kubeadm:cluster-admins" Group, and issues admin.conf's client
 //     certificate with that Group as its certificate O= (organization). It ships, unconditionally,
 //     on every kubeadm-bootstrapped cluster from that version on — the kubeadm equivalent of the
-//     cluster-admin -> system:masters default this check already excludes outright.
+//     cluster-admin -> system:masters default this check already excludes outright. Left ungated
+//     (Distros: nil) — see the field doc above for why.
 //   - "eks:addon-cluster-admin": created by Amazon EKS to let its add-on manager reconcile
 //     cluster resources. The subject is a User with no system: prefix, so without this entry the
-//     check reports a critical misconfiguration on every EKS cluster.
-var knownDistroDefaultBindings = map[string][]distroDefaultSubject{
+//     check reports a critical misconfiguration on every EKS cluster. Gated to Distros:
+//     []string{"eks"} — this one has no EC2-detection ambiguity to worry about.
+var knownDistroDefaultBindings = map[string]distroDefaultBinding{
 	"kubeadm:cluster-admins": {
-		{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"},
+		Subjects: []distroDefaultSubject{
+			{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"},
+		},
 	},
 	"eks:addon-cluster-admin": {
-		{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
+		Subjects: []distroDefaultSubject{
+			{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
+		},
+		Distros: []string{"eks"},
 	},
+}
+
+// distroAllowed reports whether distro is one an entry's Distros list permits — an empty list means
+// "any distribution" (see knownDistroDefaultBindings' kubeadm entry and distroDefaultBinding.Distros).
+func distroAllowed(allowed []string, distro string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, d := range allowed {
+		if d == distro {
+			return true
+		}
+	}
+	return false
 }
 
 // distroDefaultBindingReasons is the RbacFinding.Reason used per binding, in the same
@@ -157,22 +198,30 @@ func distroDefaultBindingReason(bindingName string) string {
 }
 
 // isKnownDistroDefaultBinding reports whether crb — together with its already-computed set of
-// non-system ("offending") subjects — matches a knownDistroDefaultBindings entry exactly. Both the
-// binding's name AND every offending subject must match:
+// non-system ("offending") subjects, on a cluster detected as distro — matches a
+// knownDistroDefaultBindings entry exactly. The binding's name, every offending subject, AND the
+// detected distribution must all match:
 //
 //   - requiring every offending subject to be one of the expected ones (not just one of them)
 //     means a binding that happens to share the well-known name but was edited to also grant, say,
 //     an arbitrary ServiceAccount isn't given the downgrade;
 //   - requiring the binding's own name to match (not just the subject) means a differently-named,
 //     custom binding that happens to grant the same well-known identity is still treated as a
-//     regular fail/critical finding — see rbac_test.go's "differently-named custom binding" cases.
-func isKnownDistroDefaultBinding(crb rbacv1.ClusterRoleBinding, offendingSubjects []rbacv1.Subject) bool {
-	want, ok := knownDistroDefaultBindings[crb.Name]
+//     regular fail/critical finding — see rbac_test.go's "differently-named custom binding" cases;
+//   - requiring distro to be allowed (distroAllowed) means a binding that merely shares an EKS
+//     name+subject on a non-EKS cluster — whether by coincidence or an attacker deliberately
+//     mimicking the provider default to get the downgrade — is not given it either. See
+//     rbac_test.go's "eks binding on a non-eks cluster does NOT downgrade" case.
+func isKnownDistroDefaultBinding(crb rbacv1.ClusterRoleBinding, offendingSubjects []rbacv1.Subject, distro string) bool {
+	binding, ok := knownDistroDefaultBindings[crb.Name]
 	if !ok || len(offendingSubjects) == 0 {
 		return false
 	}
+	if !distroAllowed(binding.Distros, distro) {
+		return false
+	}
 	for _, s := range offendingSubjects {
-		if !isExpectedDistroDefaultSubject(want, s) {
+		if !isExpectedDistroDefaultSubject(binding.Subjects, s) {
 			return false
 		}
 	}
@@ -199,14 +248,17 @@ func (clusterAdminBindingCheck) ID() string { return "KG-RB-001" }
 // Run flags ClusterRoleBindings granting the built-in cluster-admin ClusterRole to any subject
 // outside the expected system identities. The default cluster-admin -> system:masters binding
 // that ships with every cluster is intentionally excluded. A binding matching
-// knownDistroDefaultBindings (currently just kubeadm's "kubeadm:cluster-admins") is downgraded to
-// warn instead of fail — still listed in AffectedResources for visibility, since group membership
-// is worth knowing about even when expected — but doesn't by itself make the check fail. A single
-// genuinely custom offending binding still fails the whole check (with any known-default binding,
-// if present, still included alongside it in the resource list — see rbac_test.go).
+// knownDistroDefaultBindings (kubeadm's "kubeadm:cluster-admins", EKS's
+// "eks:addon-cluster-admin", each gated to its own detected distribution — see
+// isKnownDistroDefaultBinding) is downgraded to warn instead of fail — still listed in
+// AffectedResources for visibility, since group membership is worth knowing about even when
+// expected — but doesn't by itself make the check fail. A single genuinely custom offending
+// binding still fails the whole check (with any known-default binding, if present, still included
+// alongside it in the resource list — see rbac_test.go).
 func (clusterAdminBindingCheck) Run(snap *snapshot.Snapshot) Result {
 	var failBindings, warnBindings []string
 	nsSet := map[string]bool{}
+	distro := detectedDistribution(snap)
 
 	for _, crb := range snap.ClusterRoleBindings {
 		if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != "cluster-admin" {
@@ -224,7 +276,7 @@ func (clusterAdminBindingCheck) Run(snap *snapshot.Snapshot) Result {
 		if len(offending) == 0 {
 			continue
 		}
-		if isKnownDistroDefaultBinding(crb, offending) {
+		if isKnownDistroDefaultBinding(crb, offending, distro) {
 			warnBindings = append(warnBindings, "clusterrolebinding/"+crb.Name)
 		} else {
 			failBindings = append(failBindings, "clusterrolebinding/"+crb.Name)
@@ -717,6 +769,7 @@ func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
 		}
 	}
 	wildcardRoles, secretsRoles := riskyRoleSets(snap)
+	distro := detectedDistribution(snap)
 
 	drafts := []report.RbacFinding{}
 
@@ -733,7 +786,7 @@ func RbacFindings(snap *snapshot.Snapshot) []report.RbacFinding {
 				}
 			}
 			risk, reason := "critical", "Grants cluster-admin (full control of the cluster) to a subject outside the expected system identities."
-			if isKnownDistroDefaultBinding(crb, offending) {
+			if isKnownDistroDefaultBinding(crb, offending, distro) {
 				risk, reason = "medium", distroDefaultBindingReason(crb.Name)
 			}
 			for _, subj := range offending {

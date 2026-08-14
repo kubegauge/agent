@@ -276,7 +276,7 @@ func workloadUsesFlaggedImage(src report.WorkloadSource, flagged map[string]bool
 	return false
 }
 
-// ---- KG-SU-004: image signature verification admission (sigstore/connaisseur/kyverno) -----------
+// ---- KG-SU-004: image signature verification admission (sigstore/connaisseur/kyverno/ImagePolicyWebhook) ----
 
 type imageSignatureVerificationCheck struct{}
 

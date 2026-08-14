@@ -4,6 +4,7 @@ package checks
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -15,6 +16,13 @@ import (
 	"github.com/kubegauge/agent/internal/report"
 	"github.com/kubegauge/agent/internal/snapshot"
 )
+
+// eksNode returns a Node fixture whose providerID makes report.DetectDistribution (and this
+// package's detectedDistribution wrapper) resolve to "eks" — the same aws:// prefix
+// controlplane_test.go's fixtures use.
+func eksNode() corev1.Node {
+	return corev1.Node{Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-0123456789"}}
+}
 
 func clusterAdminCRB(name string, subjects ...rbacv1.Subject) rbacv1.ClusterRoleBinding {
 	return rbacv1.ClusterRoleBinding{
@@ -94,24 +102,57 @@ func TestClusterAdminBindingCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "EKS addon-manager binding warns instead of failing",
-			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
-				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"}),
-			}},
+			name: "EKS addon-manager binding warns instead of failing on a cluster detected as eks",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{eksNode()},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"}),
+				},
+			},
 			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
 		},
 		{
-			name: "a provider binding name carrying an unexpected extra subject still fails",
+			// The binding name and subject are byte-for-byte EKS's default, but nothing about this
+			// snapshot detects as eks (no Nodes at all) — so this must NOT get the downgrade. Without
+			// the distribution gate, a binding named/shaped like this on ANY cluster (or crafted by an
+			// attacker with bind/escalate rights) would silently downgrade and claim EKS provenance it
+			// doesn't have.
+			name: "eks:addon-cluster-admin binding on a non-eks cluster does not get the downgrade",
 			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
-				clusterAdminCRB("eks:addon-cluster-admin",
-					rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
-					rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "jenkins", Namespace: "ci-cd"},
-				),
+				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"}),
 			}},
+			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
+		},
+		{
+			// Regression guard: report.DetectDistribution checks a node's aws:// providerID BEFORE it
+			// checks for the kubeadm ConfigMap, so a kubeadm cluster bootstrapped on plain EC2 instances
+			// (no EKS involved) detects as "eks". The kubeadm entry in knownDistroDefaultBindings is
+			// deliberately left ungated (Distros: nil) so this real cluster shape keeps its downgrade
+			// instead of regressing to critical.
+			name: "kubeadm's default binding still downgrades on a cluster that detects as eks (kubeadm-on-EC2)",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{eksNode()},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					clusterAdminCRB("kubeadm:cluster-admins", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"}),
+				},
+			},
+			want: Result{Status: "warn", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/kubeadm:cluster-admins"}},
+		},
+		{
+			name: "a provider binding name carrying an unexpected extra subject still fails",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{eksNode()},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					clusterAdminCRB("eks:addon-cluster-admin",
+						rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"},
+						rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "jenkins", Namespace: "ci-cd"},
+					),
+				},
+			},
 			want: Result{Status: "fail", Namespaces: []string{"ci-cd"}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
 		},
 		{
-			name: "the AKS user granted through a differently-named custom binding still fails",
+			name: "a provider-style User granted through a differently-named custom binding still fails",
 			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
 				clusterAdminCRB("ops-shortcut", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "clusterAdmin"}),
 			}},
@@ -119,9 +160,12 @@ func TestClusterAdminBindingCheck(t *testing.T) {
 		},
 		{
 			name: "a Group subject sharing the EKS user name does not get the downgrade",
-			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
-				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "eks:addon-manager"}),
-			}},
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{eksNode()},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "eks:addon-manager"}),
+				},
+			},
 			want: Result{Status: "fail", Namespaces: []string{}, AffectedResources: []string{"clusterrolebinding/eks:addon-cluster-admin"}},
 		},
 	}
@@ -328,8 +372,36 @@ func TestRbacFindings(t *testing.T) {
 		if got[0].Risk != "medium" {
 			t.Errorf("Risk = %q, want medium", got[0].Risk)
 		}
-		if got[0].Reason != distroDefaultBindingReason("kubeadm:cluster-admins") {
-			t.Errorf("Reason = %q, want the known-default binding reason", got[0].Reason)
+		// A literal substring, not a call to distroDefaultBindingReason (the function under test) —
+		// comparing against the function itself is a tautology that a typo'd map key would still
+		// pass, silently serving the generic fallback sentence instead of kubeadm-specific wording.
+		const wantSubstring = "kubeadm:cluster-admins group used by the admin.conf certificate"
+		if !strings.Contains(got[0].Reason, wantSubstring) {
+			t.Errorf("Reason = %q, want it to contain %q", got[0].Reason, wantSubstring)
+		}
+	})
+
+	t.Run("EKS addon-manager binding yields a medium-risk finding with EKS-specific wording, not the generic fallback", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			Nodes: []corev1.Node{eksNode()},
+			ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("eks:addon-cluster-admin", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "eks:addon-manager"}),
+			},
+		}
+		got := RbacFindings(snap)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 finding, got %d: %+v", len(got), got)
+		}
+		if got[0].Risk != "medium" {
+			t.Errorf("Risk = %q, want medium", got[0].Risk)
+		}
+		// A literal substring distinctive to the EKS reason, never a call to the function under test
+		// (see the kubeadm subtest above for why that would be a tautology). This is also the only
+		// place in this file that asserts Risk/Reason for the EKS case at all — every other EKS
+		// coverage lives in TestClusterAdminBindingCheck, which never inspects RbacFinding.
+		const wantSubstring = "does not recreate it"
+		if !strings.Contains(got[0].Reason, wantSubstring) {
+			t.Errorf("Reason = %q, want it to contain %q", got[0].Reason, wantSubstring)
 		}
 	})
 
@@ -781,5 +853,18 @@ func TestPodCreateInSecretNamespacesCheck(t *testing.T) {
 				t.Errorf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestKnownDistroDefaultBindingsHaveMatchingReasons is a map-sync guard: distroDefaultBindingReason
+// falls back silently to a generic sentence for any key missing from distroDefaultBindingReasons, so
+// a typo'd or forgotten key would still downgrade the binding correctly and still pass every other
+// test — it would just silently serve the generic wording instead of the distribution-specific text
+// this check exists to show. This test turns that silent fallback into a red build.
+func TestKnownDistroDefaultBindingsHaveMatchingReasons(t *testing.T) {
+	for name := range knownDistroDefaultBindings {
+		if _, ok := distroDefaultBindingReasons[name]; !ok {
+			t.Errorf("knownDistroDefaultBindings[%q] has no matching entry in distroDefaultBindingReasons — it would silently fall back to the generic reason", name)
+		}
 	}
 }
