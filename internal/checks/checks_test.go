@@ -99,6 +99,31 @@ func TestUncollectedResourcesDegradeDependentChecksToNA(t *testing.T) {
 	}
 }
 
+// TestSystemMastersBindingCheckDoesNotDegradeOnUncollectedRoles guards the over-inclusion a
+// review caught: KG-RB-007 (systemMastersBindingCheck) reads only ClusterRoleBindings and
+// RoleBindings — it never resolves a roleRef, so it never touches Roles or ClusterRoles. Listing
+// it under those two resourceDependencies keys would force a correct verdict to "na" whenever
+// Roles/ClusterRoles fail to collect but bindings collect fine, which is an unmeasured claim of
+// "I could not assess this". KG-RB-005 (systemAuthenticatedBindingCheck) is the same
+// binding-only shape and is deliberately absent from "roles"/"clusterroles" too; KG-RB-007 must
+// follow the same convention.
+func TestSystemMastersBindingCheckDoesNotDegradeOnUncollectedRoles(t *testing.T) {
+	snap := &snapshot.Snapshot{
+		Uncollected: []snapshot.CollectionError{
+			{Resource: "roles", Reason: "roles is forbidden"},
+			{Resource: "clusterroles", Reason: "clusterroles is forbidden"},
+		},
+	}
+
+	byID := map[string]string{}
+	for _, rc := range Run(snap) {
+		byID[rc.ID] = rc.Status
+	}
+	if byID["KG-RB-007"] == "na" {
+		t.Error("KG-RB-007 does not read Roles or ClusterRoles and must not degrade to na when only they are uncollected")
+	}
+}
+
 // TestRbacFindingsAreEmptyWhenRbacWasNotCollected: an uncollected binding list means "unknown", and
 // unknown must not render as a cluster with no risky bindings.
 func TestRbacFindingsAreEmptyWhenRbacWasNotCollected(t *testing.T) {
