@@ -117,17 +117,6 @@ func newGrantResolver(snap *snapshot.Snapshot) grantResolver {
 	return r
 }
 
-// rulesFor resolves ref (from a binding living in bindingNamespace; "" for a ClusterRoleBinding)
-// to its rules, and reports the resolved role's name plus whether it was found.
-func (r grantResolver) rulesFor(ref rbacv1.RoleRef, bindingNamespace string) ([]rbacv1.PolicyRule, string, bool) {
-	if ref.Kind == "ClusterRole" {
-		cr, ok := r.clusterRoles[ref.Name]
-		return cr.Rules, cr.Name, ok
-	}
-	role, ok := r.roles[bindingNamespace+"/"+ref.Name]
-	return role.Rules, role.Name, ok
-}
-
 // grants reports whether ref confers any of the grants matchers describes, and returns the
 // resolved role object so the caller can decide whether the distribution owns it.
 func (r grantResolver) grants(ref rbacv1.RoleRef, bindingNamespace string, matchers []grantMatcher) (metav1.Object, bool) {
