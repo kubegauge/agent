@@ -141,6 +141,19 @@ func newGrantResolver(snap *snapshot.Snapshot) grantResolver {
 	return r
 }
 
+// nonSystemSubjects returns the subjects that are not the cluster's own identities — the shape
+// isKnownDistroDefaultBinding expects, which requires every one of them to be an expected subject
+// of the distribution's bootstrap binding before it grants the downgrade.
+func nonSystemSubjects(subjects []rbacv1.Subject) []rbacv1.Subject {
+	var out []rbacv1.Subject
+	for _, s := range subjects {
+		if !isSystemSubject(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // isKubernetesSystemRole reports whether name is one of the cluster's own control-plane roles.
 //
 // Deliberately NOT isCustomRoleName, which additionally excludes cluster-admin, admin, edit and
@@ -221,9 +234,21 @@ func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStat
 	}
 
 	for _, crb := range snap.ClusterRoleBindings {
-		if obj, ok := resolver.grants(crb.RoleRef, "", matchers); ok {
-			consider("clusterrolebinding/"+crb.Name, "", obj, crb.Subjects)
+		obj, ok := resolver.grants(crb.RoleRef, "", matchers)
+		if !ok {
+			continue
 		}
+		// A distribution's own bootstrap binding is not the customer's doing, and since these
+		// checks stopped excluding the built-in cluster-admin role they resolve straight through
+		// it. kubeadm >=1.29 ships clusterrolebinding/kubeadm:cluster-admins -> cluster-admin,
+		// whose subject group carries no system: prefix, so without this every kubeadm cluster
+		// would report all six checks against a binding it cannot remove. KG-RB-001 already
+		// downgrades exactly this shape; reuse its allowlist rather than inventing a second one.
+		if isKnownDistroDefaultBinding(crb, nonSystemSubjects(crb.Subjects), distro) {
+			provider = append(provider, "clusterrolebinding/"+crb.Name)
+			continue
+		}
+		consider("clusterrolebinding/"+crb.Name, "", obj, crb.Subjects)
 	}
 	// A RoleBinding is consulted only for requests inside its own namespace, so it can confer only
 	// the namespaced targets. With none of them in play the loop has nothing to find at all.

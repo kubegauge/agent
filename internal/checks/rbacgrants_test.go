@@ -957,3 +957,48 @@ func TestRoleBindingScopeAndBuiltInRoles(t *testing.T) {
 		}
 	})
 }
+
+// TestStockKubeadmClusterIsNotAccused reproduces the binding every kubeadm >=1.29 cluster ships:
+// clusterrolebinding/kubeadm:cluster-admins -> ClusterRole/cluster-admin, whose subject group
+// carries no system: prefix. Once these checks stopped excluding the built-in cluster-admin role
+// (so the canonical CIS 5.1.13 case would stop reporting pass), that binding started resolving
+// straight through a role granting "*" on "*" — and every one of the six checks fired on every
+// kubeadm cluster, naming an object the operator cannot remove. This pins the downgrade that
+// stops it.
+func TestStockKubeadmClusterIsNotAccused(t *testing.T) {
+	snap := &snapshot.Snapshot{
+		KubeadmConfigMapFound: true,
+		ClusterRoles: []rbacv1.ClusterRole{
+			grantClusterRole("cluster-admin", []string{"*"}, []string{"*"}, []string{"*"}),
+		},
+		ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+			grantCRB("kubeadm:cluster-admins", "cluster-admin",
+				rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"}),
+		},
+	}
+	for _, c := range []Check{
+		escalationVerbGrantCheck{}, persistentVolumeCreateGrantCheck{}, nodesProxyGrantCheck{},
+		csrApprovalGrantCheck{}, webhookConfigWriteGrantCheck{}, tokenCreateGrantCheck{},
+	} {
+		got := c.Run(snap)
+		if got.Status != "info" {
+			t.Errorf("%s on a stock kubeadm cluster: got %q, want \"info\" — the bootstrap binding is not the operator's doing", c.ID(), got.Status)
+		}
+	}
+
+	// The allowlist is keyed on the binding's exact name and subjects, so a custom binding to the
+	// same group is still the operator's own and must keep being reported.
+	custom := &snapshot.Snapshot{
+		KubeadmConfigMapFound: true,
+		ClusterRoles: []rbacv1.ClusterRole{
+			grantClusterRole("cluster-admin", []string{"*"}, []string{"*"}, []string{"*"}),
+		},
+		ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+			grantCRB("ops-shortcut", "cluster-admin",
+				rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"}),
+		},
+	}
+	if got := (tokenCreateGrantCheck{}).Run(custom).Status; got != "warn" {
+		t.Errorf("a differently-named binding to the same group: got %q, want \"warn\"", got)
+	}
+}
