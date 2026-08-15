@@ -7,5 +7,5 @@ type: application
 # --version ${TAG#v}); appVersion keeps the tag verbatim because that is how the image is
 # published (ghcr.io/kubegauge/agent:v0.16.1). Both are asserted against the tag by CI on release
 # and against each other by internal/chart's TestChartVersionsAgree.
-version: 0.16.2
-appVersion: "v0.16.2"
+version: 0.17.0
+appVersion: "v0.17.0"
