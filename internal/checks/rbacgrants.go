@@ -327,3 +327,72 @@ func (tokenCreateGrantCheck) ID() string { return "KG-RB-013" }
 func (tokenCreateGrantCheck) Run(snap *snapshot.Snapshot) Result {
 	return boundGrantResult(snap, []grantMatcher{tokenCreateMatcher}, "warn")
 }
+
+// ---- KG-RB-007: additional bindings to the system:masters group (CIS 5.1.7) --------------------
+
+// isStockMastersBinding reports whether crb is the cluster-admin -> system:masters
+// ClusterRoleBinding that ships with every cluster. Name alone is not enough: a custom binding can
+// be named "cluster-admin" and point somewhere else entirely, so the roleRef and the subject list
+// must both match.
+func isStockMastersBinding(crb rbacv1.ClusterRoleBinding) bool {
+	if crb.Name != "cluster-admin" {
+		return false
+	}
+	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != "cluster-admin" {
+		return false
+	}
+	if len(crb.Subjects) != 1 {
+		return false
+	}
+	s := crb.Subjects[0]
+	return s.Kind == rbacv1.GroupKind && s.Name == "system:masters"
+}
+
+// bindsSystemMasters reports whether any subject is the system:masters GROUP. Kind matters: a User
+// that merely carries that name is a different identity and holds none of the group's power.
+func bindsSystemMasters(subjects []rbacv1.Subject) bool {
+	for _, s := range subjects {
+		if s.Kind == rbacv1.GroupKind && s.Name == "system:masters" {
+			return true
+		}
+	}
+	return false
+}
+
+type systemMastersBindingCheck struct{}
+
+func (systemMastersBindingCheck) ID() string { return "KG-RB-007" }
+
+// Run flags every binding to the system:masters group beyond the stock cluster-admin one. It does
+// NOT go through isSystemSubject: that helper treats system:masters as a system identity and skips
+// it, which is correct for KG-RB-001 and is exactly the blind spot this check exists to close.
+// Changing isSystemSubject instead would have altered a critical check's behavior for free.
+//
+// The honest limit, which the catalog entry must repeat: the central risk CIS 5.1.7 names is a
+// client certificate issued with O=system:masters. A certificate is not an API object — no
+// in-cluster agent sees one, on any distribution. This check detects additional BINDINGS to the
+// group and nothing else.
+func (systemMastersBindingCheck) Run(snap *snapshot.Snapshot) Result {
+	var resources []string
+	nsSet := map[string]bool{}
+
+	for _, crb := range snap.ClusterRoleBindings {
+		if isStockMastersBinding(crb) || !bindsSystemMasters(crb.Subjects) {
+			continue
+		}
+		resources = append(resources, "clusterrolebinding/"+crb.Name)
+	}
+	for _, rb := range snap.RoleBindings {
+		if !bindsSystemMasters(rb.Subjects) {
+			continue
+		}
+		resources = append(resources, "rolebinding/"+rb.Namespace+"/"+rb.Name)
+		nsSet[rb.Namespace] = true
+	}
+
+	if len(resources) == 0 {
+		return Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}}
+	}
+	sort.Strings(resources)
+	return Result{Status: "fail", Namespaces: sortedKeys(nsSet), AffectedResources: resources}
+}

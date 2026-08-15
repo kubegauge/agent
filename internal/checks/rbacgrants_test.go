@@ -608,6 +608,79 @@ func TestWebhookConfigWriteGrantCheck(t *testing.T) {
 	}
 }
 
+func TestSystemMastersBindingCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "the stock cluster-admin binding alone passes",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("cluster-admin", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:masters"}),
+			}},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an additional binding to the group fails",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				clusterAdminCRB("cluster-admin", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:masters"}),
+				grantCRB("ops-masters", "view", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:masters"}),
+			}},
+			want: Result{
+				Status:            "fail",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/ops-masters"},
+			},
+		},
+		{
+			name: "a RoleBinding to the group fails too",
+			snap: &snapshot.Snapshot{RoleBindings: []rbacv1.RoleBinding{{
+				ObjectMeta: metav1.ObjectMeta{Name: "masters-in-ns", Namespace: "payments"},
+				RoleRef:    rbacv1.RoleRef{Kind: "Role", Name: "editor"},
+				Subjects:   []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: "system:masters"}},
+			}}},
+			want: Result{
+				Status:            "fail",
+				Namespaces:        []string{"payments"},
+				AffectedResources: []string{"rolebinding/payments/masters-in-ns"},
+			},
+		},
+		{
+			name: "a binding named cluster-admin but pointing elsewhere is not the stock one",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				grantCRB("cluster-admin", "view", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:masters"}),
+			}},
+			want: Result{
+				Status:            "fail",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/cluster-admin"},
+			},
+		},
+		{
+			name: "a User merely named like the group is a different identity",
+			snap: &snapshot.Snapshot{ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				grantCRB("impostor", "view", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "system:masters"}),
+			}},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "no binding to the group at all passes",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (systemMastersBindingCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTokenCreateGrantCheck(t *testing.T) {
 	tests := []struct {
 		name string
