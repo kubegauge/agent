@@ -57,6 +57,13 @@ var All = []Check{
 	automountDefaultSACheck{},
 	podCreateInSecretNamespacesCheck{},
 	systemAuthenticatedBindingCheck{},
+	systemMastersBindingCheck{},
+	escalationVerbGrantCheck{},
+	persistentVolumeCreateGrantCheck{},
+	nodesProxyGrantCheck{},
+	csrApprovalGrantCheck{},
+	webhookConfigWriteGrantCheck{},
+	tokenCreateGrantCheck{},
 
 	psaEnforceLabelCheck{},
 	privilegedPodCheck{},
@@ -115,10 +122,10 @@ var All = []Check{
 // collection pass in internal/snapshot, because no honest report survives it.
 var resourceDependencies = map[string][]string{
 	"serviceaccounts":                 {"KG-RB-003"},
-	"roles":                           {"KG-RB-002", "KG-RB-004", "KG-RB-006"},
-	"clusterroles":                    {"KG-RB-002", "KG-RB-004", "KG-RB-006"},
-	"rolebindings":                    {"KG-RB-004", "KG-RB-005"},
-	"clusterrolebindings":             {"KG-RB-001", "KG-RB-004", "KG-RB-005"},
+	"roles":                           {"KG-RB-002", "KG-RB-004", "KG-RB-006", "KG-RB-007", "KG-RB-008", "KG-RB-009", "KG-RB-010", "KG-RB-011", "KG-RB-012", "KG-RB-013"},
+	"clusterroles":                    {"KG-RB-002", "KG-RB-004", "KG-RB-006", "KG-RB-007", "KG-RB-008", "KG-RB-009", "KG-RB-010", "KG-RB-011", "KG-RB-012", "KG-RB-013"},
+	"rolebindings":                    {"KG-RB-004", "KG-RB-005", "KG-RB-007", "KG-RB-008", "KG-RB-009", "KG-RB-010", "KG-RB-011", "KG-RB-012", "KG-RB-013"},
+	"clusterrolebindings":             {"KG-RB-001", "KG-RB-004", "KG-RB-005", "KG-RB-007", "KG-RB-008", "KG-RB-009", "KG-RB-010", "KG-RB-011", "KG-RB-012", "KG-RB-013"},
 	"validatingwebhookconfigurations": {"KG-SU-004"},
 	"resourcequotas":                  {"KG-QT-001"},
 	"limitranges":                     {"KG-QT-002"},
