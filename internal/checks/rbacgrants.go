@@ -221,3 +221,109 @@ func (nodesProxyGrantCheck) ID() string { return "KG-RB-010" }
 func (nodesProxyGrantCheck) Run(snap *snapshot.Snapshot) Result {
 	return boundGrantResult(snap, []grantMatcher{nodesProxyMatcher}, "warn")
 }
+
+// ---- KG-RB-008: bind/escalate/impersonate verb grants (CIS 5.1.8) -----------------------------
+
+// escalationVerbMatchers targets what CIS 5.1.8 calls out: bind and escalate are verbs on RBAC
+// objects themselves (rbac.authorization.k8s.io) — granting either lets the holder create a
+// binding or a role broader than their own permissions. impersonate is a different axis entirely:
+// it is a verb on core-group identities (users, groups, serviceaccounts), letting the holder act
+// as any identity it names. Two matchers because CIS bundles three verbs living in two API groups
+// under one control.
+var escalationVerbMatchers = []grantMatcher{
+	{
+		APIGroups: []string{"rbac.authorization.k8s.io"},
+		Resources: []string{"roles", "clusterroles", "rolebindings", "clusterrolebindings"},
+		Verbs:     []string{"bind", "escalate"},
+	},
+	{
+		APIGroups: []string{""},
+		Resources: []string{"users", "groups", "serviceaccounts"},
+		Verbs:     []string{"impersonate"},
+	},
+}
+
+type escalationVerbGrantCheck struct{}
+
+func (escalationVerbGrantCheck) ID() string { return "KG-RB-008" }
+
+func (escalationVerbGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	return boundGrantResult(snap, escalationVerbMatchers, "fail")
+}
+
+// ---- KG-RB-009: create access to PersistentVolumes (CIS 5.1.9) --------------------------------
+
+// persistentVolumeCreateMatcher targets what CIS 5.1.9 names. A PersistentVolume can mount a
+// hostPath, so create access to one is a path to the node's filesystem that does not go through
+// the pod-security checks at all.
+var persistentVolumeCreateMatcher = grantMatcher{
+	APIGroups: []string{""},
+	Resources: []string{"persistentvolumes"},
+	Verbs:     []string{"create"},
+}
+
+type persistentVolumeCreateGrantCheck struct{}
+
+func (persistentVolumeCreateGrantCheck) ID() string { return "KG-RB-009" }
+
+func (persistentVolumeCreateGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	return boundGrantResult(snap, []grantMatcher{persistentVolumeCreateMatcher}, "warn")
+}
+
+// ---- KG-RB-011: approve access to the certificatesigningrequests/approval sub-resource
+// (CIS 5.1.11) --------------------------------------------------------------------------------
+
+// csrApprovalMatcher targets the sub-resource CIS 5.1.11 names. Approving a CSR mints a client
+// certificate for whatever identity the request names; no Verbs restriction is set because any
+// verb on this sub-resource is enough to reach the approve subresource action.
+var csrApprovalMatcher = grantMatcher{
+	APIGroups: []string{"certificates.k8s.io"},
+	Resources: []string{"certificatesigningrequests/approval"},
+}
+
+type csrApprovalGrantCheck struct{}
+
+func (csrApprovalGrantCheck) ID() string { return "KG-RB-011" }
+
+func (csrApprovalGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	return boundGrantResult(snap, []grantMatcher{csrApprovalMatcher}, "warn")
+}
+
+// ---- KG-RB-012: write access to webhook configurations (CIS 5.1.12) ---------------------------
+
+// webhookConfigWriteMatcher targets what CIS 5.1.12 names. Writing a ValidatingWebhookConfiguration
+// or MutatingWebhookConfiguration lets the holder point admission at a webhook they control, which
+// can rewrite or wave through anything the API server would otherwise enforce.
+var webhookConfigWriteMatcher = grantMatcher{
+	APIGroups: []string{"admissionregistration.k8s.io"},
+	Resources: []string{"validatingwebhookconfigurations", "mutatingwebhookconfigurations"},
+	Verbs:     []string{"create", "update", "patch", "delete"},
+}
+
+type webhookConfigWriteGrantCheck struct{}
+
+func (webhookConfigWriteGrantCheck) ID() string { return "KG-RB-012" }
+
+func (webhookConfigWriteGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	return boundGrantResult(snap, []grantMatcher{webhookConfigWriteMatcher}, "warn")
+}
+
+// ---- KG-RB-013: create access to the serviceaccounts/token sub-resource (CIS 5.1.13) ----------
+
+// tokenCreateMatcher targets the sub-resource CIS 5.1.13 names. Creating a token for a
+// ServiceAccount mints a fresh credential for it, independent of any RBAC grant on the
+// ServiceAccount object itself — the same privilege-escalation shape as impersonation, reached
+// through TokenRequest instead.
+var tokenCreateMatcher = grantMatcher{
+	APIGroups: []string{""},
+	Resources: []string{"serviceaccounts/token"},
+	Verbs:     []string{"create"},
+}
+
+type tokenCreateGrantCheck struct{}
+
+func (tokenCreateGrantCheck) ID() string { return "KG-RB-013" }
+
+func (tokenCreateGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	return boundGrantResult(snap, []grantMatcher{tokenCreateMatcher}, "warn")
+}

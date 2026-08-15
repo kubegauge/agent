@@ -267,3 +267,422 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestEscalationVerbGrantCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "no role grants bind, escalate or impersonate",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a bound role granting escalate on clusterroles fails and names the binding",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("escalator", []string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("escalator", "escalator", saSubject("ops", "operator")),
+				},
+			},
+			want: Result{
+				Status:            "fail",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/escalator"},
+			},
+		},
+		{
+			name: "an UNBOUND role granting escalate is not reported",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("orphan-escalator", []string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate"}),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "get/list on the same RBAC resources does not match",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("rbac-reader",
+						[]string{"rbac.authorization.k8s.io"},
+						[]string{"roles", "clusterroles", "rolebindings", "clusterrolebindings"},
+						[]string{"get", "list"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("rbac-reader", "rbac-reader", saSubject("ops", "reader")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("escalator-managed",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("escalator-managed", "escalator-managed", saSubject("kube-system", "controller")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/escalator-managed"},
+			},
+		},
+		{
+			name: "impersonate on users and escalate on clusterroles are both reported, proving both matchers are consulted",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("impersonator", []string{""}, []string{"users"}, []string{"impersonate"}),
+					grantClusterRole("escalator-two", []string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("impersonator-binding", "impersonator", saSubject("ops", "impersonator")),
+					grantCRB("escalator-binding", "escalator-two", saSubject("ops", "escalator")),
+				},
+			},
+			want: Result{
+				Status:            "fail",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/escalator-binding", "clusterrolebinding/impersonator-binding"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (escalationVerbGrantCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPersistentVolumeCreateGrantCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "no role grants create on persistentvolumes",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a bound role granting create on persistentvolumes warns and names the binding",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("pv-creator", []string{""}, []string{"persistentvolumes"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("pv-creator", "pv-creator", saSubject("storage", "provisioner")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"storage"},
+				AffectedResources: []string{"clusterrolebinding/pv-creator"},
+			},
+		},
+		{
+			name: "an UNBOUND role granting create on persistentvolumes is not reported",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("orphan-pv-creator", []string{""}, []string{"persistentvolumes"}, []string{"create"}),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "create on persistentvolumeclaims does not match",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("pvc-creator", []string{""}, []string{"persistentvolumeclaims"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("pvc-creator", "pvc-creator", saSubject("storage", "claimant")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("pv-creator-managed",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{""}, []string{"persistentvolumes"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("pv-creator-managed", "pv-creator-managed", saSubject("kube-system", "provisioner")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/pv-creator-managed"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (persistentVolumeCreateGrantCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCsrApprovalGrantCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "no role grants access to certificatesigningrequests/approval",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a bound role granting update on certificatesigningrequests/approval warns and names the binding",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("csr-approver", []string{"certificates.k8s.io"}, []string{"certificatesigningrequests/approval"}, []string{"update"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("csr-approver", "csr-approver", saSubject("ops", "approver")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/csr-approver"},
+			},
+		},
+		{
+			name: "an UNBOUND role granting the approval sub-resource is not reported",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("orphan-csr-approver", []string{"certificates.k8s.io"}, []string{"certificatesigningrequests/approval"}, []string{"update"}),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "certificatesigningrequests without the approval sub-resource does not match",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("csr-reader", []string{"certificates.k8s.io"}, []string{"certificatesigningrequests"}, []string{"get", "list", "update"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("csr-reader", "csr-reader", saSubject("ops", "reader")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("csr-approver-managed",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{"certificates.k8s.io"}, []string{"certificatesigningrequests/approval"}, []string{"update"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("csr-approver-managed", "csr-approver-managed", saSubject("kube-system", "controller")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/csr-approver-managed"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (csrApprovalGrantCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWebhookConfigWriteGrantCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "no role grants write access to webhook configurations",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a bound role granting create on validatingwebhookconfigurations warns and names the binding",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("webhook-writer", []string{"admissionregistration.k8s.io"}, []string{"validatingwebhookconfigurations"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("webhook-writer", "webhook-writer", saSubject("ops", "operator")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/webhook-writer"},
+			},
+		},
+		{
+			name: "an UNBOUND role granting write access to webhook configurations is not reported",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("orphan-webhook-writer", []string{"admissionregistration.k8s.io"}, []string{"mutatingwebhookconfigurations"}, []string{"update"}),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "get/list/watch on the same resources does not match",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("webhook-reader",
+						[]string{"admissionregistration.k8s.io"},
+						[]string{"validatingwebhookconfigurations", "mutatingwebhookconfigurations"},
+						[]string{"get", "list", "watch"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("webhook-reader", "webhook-reader", saSubject("ops", "reader")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("webhook-writer-managed",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{"admissionregistration.k8s.io"}, []string{"mutatingwebhookconfigurations"}, []string{"patch"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("webhook-writer-managed", "webhook-writer-managed", saSubject("kube-system", "controller")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/webhook-writer-managed"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (webhookConfigWriteGrantCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTokenCreateGrantCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want Result
+	}{
+		{
+			name: "no role grants create on serviceaccounts/token",
+			snap: &snapshot.Snapshot{},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a bound role granting create on serviceaccounts/token warns and names the binding",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("token-creator", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("token-creator", "token-creator", saSubject("ops", "minter")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/token-creator"},
+			},
+		},
+		{
+			name: "an UNBOUND role granting create on serviceaccounts/token is not reported",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("orphan-token-creator", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "serviceaccounts without the token sub-resource does not match",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("sa-creator", []string{""}, []string{"serviceaccounts"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("sa-creator", "sa-creator", saSubject("ops", "creator")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("token-creator-managed",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("token-creator-managed", "token-creator-managed", saSubject("kube-system", "controller")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/token-creator-managed"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (tokenCreateGrantCheck{}).Run(tt.snap)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Run() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
