@@ -244,7 +244,14 @@ func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStat
 		// whose subject group carries no system: prefix, so without this every kubeadm cluster
 		// would report all six checks against a binding it cannot remove. KG-RB-001 already
 		// downgrades exactly this shape; reuse its allowlist rather than inventing a second one.
-		if isKnownDistroDefaultBinding(crb, nonSystemSubjects(crb.Subjects), distro) {
+		// The roleRef must be pinned before the allowlist is consulted, exactly as
+		// clusterAdminBindingCheck does. Without it the bypass is forgeable: the kubeadm entry is
+		// ungated by distribution, so anyone able to create a ClusterRoleBinding could name it
+		// kubeadm:cluster-admins, give it that Group as its only subject, and point it at a role
+		// of their own — silencing all six checks. KG-RB-001 would not catch it either, because
+		// its roleRef is not cluster-admin.
+		if crb.RoleRef.Kind == "ClusterRole" && crb.RoleRef.Name == "cluster-admin" &&
+			isKnownDistroDefaultBinding(crb, nonSystemSubjects(crb.Subjects), distro) {
 			provider = append(provider, "clusterrolebinding/"+crb.Name)
 			continue
 		}

@@ -986,6 +986,23 @@ func TestStockKubeadmClusterIsNotAccused(t *testing.T) {
 		}
 	}
 
+	// The bypass is keyed on the roleRef too. Without that, anyone able to create a
+	// ClusterRoleBinding could forge this exact name and subject over a role of their own and
+	// silence all six checks at once.
+	forged := &snapshot.Snapshot{
+		KubeadmConfigMapFound: true,
+		ClusterRoles: []rbacv1.ClusterRole{
+			grantClusterRole("attacker-minter", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+		},
+		ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+			grantCRB("kubeadm:cluster-admins", "attacker-minter",
+				rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "kubeadm:cluster-admins"}),
+		},
+	}
+	if got := (tokenCreateGrantCheck{}).Run(forged).Status; got != "warn" {
+		t.Errorf("a forged kubeadm:cluster-admins over an arbitrary role: got %q, want \"warn\"", got)
+	}
+
 	// The allowlist is keyed on the binding's exact name and subjects, so a custom binding to the
 	// same group is still the operator's own and must keep being reported.
 	custom := &snapshot.Snapshot{
