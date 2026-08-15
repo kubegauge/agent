@@ -60,6 +60,17 @@ func grantRB(namespace, name, roleName string, subjects ...rbacv1.Subject) rbacv
 	}
 }
 
+// grantRBToClusterRole builds a RoleBinding pointing at a ClusterRole — the standard
+// multi-tenancy shape, where one ClusterRole is bound per namespace. The roleRef resolves
+// globally, but the binding still only authorizes requests inside its own namespace.
+func grantRBToClusterRole(namespace, name, clusterRoleName string, subjects ...rbacv1.Subject) rbacv1.RoleBinding {
+	return rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		RoleRef:    rbacv1.RoleRef{Kind: "ClusterRole", Name: clusterRoleName},
+		Subjects:   subjects,
+	}
+}
+
 // gkeNode builds a Node whose providerID makes DetectDistribution report "gke".
 func gkeNode() corev1.Node {
 	return corev1.Node{
@@ -98,7 +109,7 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/debug-tools"},
 			},
 		},
@@ -135,7 +146,7 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/god-mode"},
 			},
 		},
@@ -174,7 +185,11 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "a namespaced role granting nodes/proxy warns and names the rolebinding",
+			// nodes/proxy is cluster-scoped, and RBAC consults a RoleBinding only for requests
+			// inside its own namespace — so this binding authorizes nobody, whatever its role's
+			// rules say. Reporting it would hand the operator an object to edit for access it does
+			// not confer, and the finding would never clear.
+			name: "a rolebinding cannot confer the cluster-scoped nodes/proxy and is not reported",
 			snap: &snapshot.Snapshot{
 				Roles: []rbacv1.Role{
 					grantRole("team-a", "proxy-role", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
@@ -183,11 +198,22 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 					grantRB("team-a", "proxy-binding", "proxy-role", saSubject("team-a", "debugger")),
 				},
 			},
-			want: Result{
-				Status:            "warn",
-				Namespaces:        []string{"team-a"},
-				AffectedResources: []string{"rolebinding/team-a/proxy-binding"},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			// The standard multi-tenancy shape: one wildcard ClusterRole bound per team with a
+			// RoleBinding. Before the namespaced-matcher filter this produced simultaneous false
+			// findings on four cluster-scoped checks at once.
+			name: "a wildcard ClusterRole bound by a RoleBinding confers no cluster-scoped grant",
+			snap: &snapshot.Snapshot{
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("team-namespace-admin", []string{"*"}, []string{"*"}, []string{"*"}),
+				},
+				RoleBindings: []rbacv1.RoleBinding{
+					grantRBToClusterRole("team-a", "team-a-admins", "team-namespace-admin", saSubject("team-a", "deployer")),
+				},
 			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
 			name: "a rolebinding naming a Role that exists only in a different namespace does not resolve",
@@ -240,7 +266,7 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/kubelet-api"},
 			},
 		},
@@ -259,7 +285,7 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/our-debugger"},
 			},
 		},
@@ -298,7 +324,7 @@ func TestEscalationVerbGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "fail",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/escalator"},
 			},
 		},
@@ -359,7 +385,7 @@ func TestEscalationVerbGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "fail",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/escalator-binding", "clusterrolebinding/impersonator-binding"},
 			},
 		},
@@ -398,7 +424,7 @@ func TestPersistentVolumeCreateGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"storage"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/pv-creator"},
 			},
 		},
@@ -477,7 +503,7 @@ func TestCsrApprovalGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/csr-approver"},
 			},
 		},
@@ -556,7 +582,7 @@ func TestWebhookConfigWriteGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/webhook-writer"},
 			},
 		},
@@ -768,7 +794,7 @@ func TestTokenCreateGrantCheck(t *testing.T) {
 			},
 			want: Result{
 				Status:            "warn",
-				Namespaces:        []string{"ops"},
+				Namespaces:        []string{},
 				AffectedResources: []string{"clusterrolebinding/token-creator"},
 			},
 		},
@@ -822,4 +848,112 @@ func TestTokenCreateGrantCheck(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRoleBindingScopeAndBuiltInRoles covers the four rules the whole-branch review established:
+// a RoleBinding confers only namespaced targets, a binding to a built-in role is still access,
+// Namespaces names where the grant applies rather than where its holder lives, and a
+// provider-owned binding is not listed beside a customer finding it cannot explain.
+func TestRoleBindingScopeAndBuiltInRoles(t *testing.T) {
+	t.Run("the wildcard ClusterRole a RoleBinding cannot use for nodes/proxy IS reported for the namespaced token grant", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			ClusterRoles: []rbacv1.ClusterRole{
+				grantClusterRole("team-namespace-admin", []string{"*"}, []string{"*"}, []string{"*"}),
+			},
+			RoleBindings: []rbacv1.RoleBinding{
+				grantRBToClusterRole("team-a", "team-a-admins", "team-namespace-admin", saSubject("team-a", "deployer")),
+			},
+		}
+		if got := (nodesProxyGrantCheck{}).Run(snap).Status; got != "pass" {
+			t.Errorf("KG-RB-010 on a RoleBinding: got %q, want \"pass\" (nodes/proxy is cluster-scoped)", got)
+		}
+		want := Result{
+			Status:            "warn",
+			Namespaces:        []string{"team-a"},
+			AffectedResources: []string{"rolebinding/team-a/team-a-admins"},
+		}
+		if got := (tokenCreateGrantCheck{}).Run(snap); !reflect.DeepEqual(got, want) {
+			t.Errorf("KG-RB-013 on the same binding: got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a RoleBinding to the built-in edit role is access and is reported", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			ClusterRoles: []rbacv1.ClusterRole{
+				grantClusterRole("edit", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+			},
+			RoleBindings: []rbacv1.RoleBinding{
+				grantRBToClusterRole("payments", "devs", "edit", saSubject("payments", "app")),
+			},
+		}
+		want := Result{
+			Status:            "warn",
+			Namespaces:        []string{"payments"},
+			AffectedResources: []string{"rolebinding/payments/devs"},
+		}
+		if got := (tokenCreateGrantCheck{}).Run(snap); !reflect.DeepEqual(got, want) {
+			t.Errorf("got %+v, want %+v — a binding to edit confers the grant for real", got, want)
+		}
+	})
+
+	t.Run("a system: role stays excluded even when bound", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			ClusterRoles: []rbacv1.ClusterRole{
+				grantClusterRole("system:controller:token-minter", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+			},
+			RoleBindings: []rbacv1.RoleBinding{
+				grantRBToClusterRole("kube-system", "minter", "system:controller:token-minter", saSubject("payments", "app")),
+			},
+		}
+		if got := (tokenCreateGrantCheck{}).Run(snap).Status; got != "pass" {
+			t.Errorf("got %q, want \"pass\" — the cluster's own control-plane roles stay out", got)
+		}
+	})
+
+	t.Run("Namespaces names where the grant applies, not where its holder lives", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			Roles: []rbacv1.Role{
+				grantRole("frontend", "token-minter", []string{""}, []string{"serviceaccounts/token"}, []string{"create"}),
+			},
+			RoleBindings: []rbacv1.RoleBinding{
+				grantRB("frontend", "minter", "token-minter", saSubject("ci-cd", "deployer")),
+			},
+		}
+		got := (tokenCreateGrantCheck{}).Run(snap)
+		want := Result{
+			Status:            "warn",
+			Namespaces:        []string{"frontend"},
+			AffectedResources: []string{"rolebinding/frontend/minter"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %+v, want %+v — frontend is the namespace exposed; ci-cd merely holds the grant", got, want)
+		}
+	})
+
+	// eksNode, not gkeNode: KG-RB-010 reports na on GKE because the CIS GKE Benchmark has no
+	// counterpart to 5.1.10, so the downgrade path is unreachable there by design.
+	t.Run("a provider binding is not listed beside a customer finding", func(t *testing.T) {
+		snap := &snapshot.Snapshot{
+			Nodes: []corev1.Node{eksNode()},
+			ClusterRoles: []rbacv1.ClusterRole{
+				labeledClusterRole("provider-proxy",
+					map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+					[]string{""}, []string{"nodes/proxy"}, []string{"*"}),
+				grantClusterRole("our-debugger", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
+			},
+			ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+				grantCRB("provider-proxy", "provider-proxy", saSubject("kube-system", "addon")),
+				grantCRB("our-debugger", "our-debugger", saSubject("ops", "debugger")),
+			},
+		}
+		got := (nodesProxyGrantCheck{}).Run(snap)
+		want := Result{
+			Status:            "warn",
+			Namespaces:        []string{},
+			AffectedResources: []string{"clusterrolebinding/our-debugger"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %+v, want %+v — the provider binding must not be handed over as something to remediate", got, want)
+		}
+	})
 }

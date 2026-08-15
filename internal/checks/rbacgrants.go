@@ -5,6 +5,7 @@ package checks
 
 import (
 	"sort"
+	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +26,29 @@ type grantMatcher struct {
 	APIGroups []string
 	Resources []string
 	Verbs     []string
+	// Namespaced marks a target that a RoleBinding can actually confer. RBAC consults a RoleBinding
+	// only for requests inside its own namespace, so a RoleBinding grants nothing on a
+	// cluster-scoped resource — nodes/proxy, persistentvolumes,
+	// certificatesigningrequests/approval and the webhook configurations — no matter which role it
+	// points at, and no matter that the role's rules name them. Reporting such a binding would
+	// hand the operator an object to edit for access it does not confer, and the finding would
+	// never clear because there is nothing there to fix.
+	//
+	// Only set this for resources that live in a namespace: serviceaccounts (and their token
+	// sub-resource), roles and rolebindings.
+	Namespaced bool
+}
+
+// namespacedMatchers returns the subset of matchers a RoleBinding can actually confer. An empty
+// result means the RoleBindings loop has nothing to look for and can be skipped entirely.
+func namespacedMatchers(matchers []grantMatcher) []grantMatcher {
+	var out []grantMatcher
+	for _, m := range matchers {
+		if m.Namespaced {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // matchesAny reports whether want appears in got, treating "*" in got as matching anything.
@@ -117,6 +141,18 @@ func newGrantResolver(snap *snapshot.Snapshot) grantResolver {
 	return r
 }
 
+// isKubernetesSystemRole reports whether name is one of the cluster's own control-plane roles.
+//
+// Deliberately NOT isCustomRoleName, which additionally excludes cluster-admin, admin, edit and
+// view. That exclusion exists so KG-RB-002 does not flag those built-in roles' DEFINITIONS as
+// suspicious — a different job. The checks in this file report who HOLDS access, and a RoleBinding
+// to edit confers its grants for real: excluding it would report the canonical CIS 5.1.13 case
+// (edit granting create on serviceaccounts/token inside a namespace) as pass, which is precisely
+// the kind of unmeasured claim these checks exist to remove.
+func isKubernetesSystemRole(name string) bool {
+	return strings.HasPrefix(name, "system:")
+}
+
 // grants reports whether ref confers any of the grants matchers describes, and returns the
 // resolved role object so the caller can decide whether the distribution owns it.
 func (r grantResolver) grants(ref rbacv1.RoleRef, bindingNamespace string, matchers []grantMatcher) (metav1.Object, bool) {
@@ -124,13 +160,13 @@ func (r grantResolver) grants(ref rbacv1.RoleRef, bindingNamespace string, match
 	var meta *metav1.ObjectMeta
 	if ref.Kind == "ClusterRole" {
 		cr, ok := r.clusterRoles[ref.Name]
-		if !ok || !isCustomRoleName(cr.Name) {
+		if !ok || isKubernetesSystemRole(cr.Name) {
 			return nil, false
 		}
 		rules, meta = cr.Rules, &cr.ObjectMeta
 	} else {
 		role, ok := r.roles[bindingNamespace+"/"+ref.Name]
-		if !ok || !isCustomRoleName(role.Name) {
+		if !ok || isKubernetesSystemRole(role.Name) {
 			return nil, false
 		}
 		rules, meta = role.Rules, &role.ObjectMeta
@@ -164,7 +200,13 @@ func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStat
 	var customer, provider []string
 	nsSet := map[string]bool{}
 
-	consider := func(ref string, roleObj metav1.Object, subjects []rbacv1.Subject) {
+	// bindingNamespace is the namespace the grant takes effect in — empty for a ClusterRoleBinding,
+	// which is cluster-wide. It is deliberately NOT the subject's namespace: the namespace at risk
+	// is where the access applies, not where its holder happens to live. KG-RB-013 is
+	// namespace-scoped and the dashboard filters on this field, so naming the holder there would
+	// hide the finding from the operator responsible for the namespace actually exposed, and show
+	// it to one that is not. KG-RB-007 in this same file already follows this convention.
+	consider := func(ref, bindingNamespace string, roleObj metav1.Object, subjects []rbacv1.Subject) {
 		if isProviderManagedRole(roleObj, distro) {
 			provider = append(provider, ref)
 			return
@@ -173,27 +215,33 @@ func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStat
 			return
 		}
 		customer = append(customer, ref)
-		for _, s := range subjects {
-			if !isSystemSubject(s) && s.Kind == rbacv1.ServiceAccountKind && s.Namespace != "" {
-				nsSet[s.Namespace] = true
-			}
+		if bindingNamespace != "" {
+			nsSet[bindingNamespace] = true
 		}
 	}
 
 	for _, crb := range snap.ClusterRoleBindings {
 		if obj, ok := resolver.grants(crb.RoleRef, "", matchers); ok {
-			consider("clusterrolebinding/"+crb.Name, obj, crb.Subjects)
+			consider("clusterrolebinding/"+crb.Name, "", obj, crb.Subjects)
 		}
 	}
-	for _, rb := range snap.RoleBindings {
-		if obj, ok := resolver.grants(rb.RoleRef, rb.Namespace, matchers); ok {
-			consider("rolebinding/"+rb.Namespace+"/"+rb.Name, obj, rb.Subjects)
+	// A RoleBinding is consulted only for requests inside its own namespace, so it can confer only
+	// the namespaced targets. With none of them in play the loop has nothing to find at all.
+	if nsMatchers := namespacedMatchers(matchers); len(nsMatchers) > 0 {
+		for _, rb := range snap.RoleBindings {
+			if obj, ok := resolver.grants(rb.RoleRef, rb.Namespace, nsMatchers); ok {
+				consider("rolebinding/"+rb.Namespace+"/"+rb.Name, rb.Namespace, obj, rb.Subjects)
+			}
 		}
 	}
 
 	switch {
+	// Provider-owned bindings are NOT folded in here. Once a customer finding exists the result
+	// carries the failing status, and a provider binding listed beside it would read as one more
+	// object to remediate — which the customer cannot do. The drawer has no way to annotate a
+	// single entry, so the honest choice is to surface them only when they stand alone, as "info".
 	case len(customer) > 0:
-		all := append(append([]string(nil), customer...), provider...)
+		all := append([]string(nil), customer...)
 		sort.Strings(all)
 		return Result{Status: failStatus, Namespaces: sortedKeys(nsSet), AffectedResources: all}
 	case len(provider) > 0:
@@ -237,12 +285,24 @@ func (nodesProxyGrantCheck) Run(snap *snapshot.Snapshot) Result {
 var escalationVerbMatchers = []grantMatcher{
 	{
 		APIGroups: []string{"rbac.authorization.k8s.io"},
-		Resources: []string{"roles", "clusterroles", "rolebindings", "clusterrolebindings"},
+		Resources: []string{"clusterroles", "clusterrolebindings"},
 		Verbs:     []string{"bind", "escalate"},
 	},
 	{
+		APIGroups:  []string{"rbac.authorization.k8s.io"},
+		Resources:  []string{"roles", "rolebindings"},
+		Verbs:      []string{"bind", "escalate"},
+		Namespaced: true,
+	},
+	{
+		APIGroups:  []string{""},
+		Resources:  []string{"serviceaccounts"},
+		Verbs:      []string{"impersonate"},
+		Namespaced: true,
+	},
+	{
 		APIGroups: []string{""},
-		Resources: []string{"users", "groups", "serviceaccounts"},
+		Resources: []string{"users", "groups"},
 		Verbs:     []string{"impersonate"},
 	},
 }
@@ -322,6 +382,10 @@ var tokenCreateMatcher = grantMatcher{
 	APIGroups: []string{""},
 	Resources: []string{"serviceaccounts/token"},
 	Verbs:     []string{"create"},
+	// ServiceAccounts are namespaced, so a RoleBinding genuinely confers this — and that is the
+	// canonical shape of the control: a namespace-scoped role that can mint tokens for the
+	// ServiceAccounts living beside it.
+	Namespaced: true,
 }
 
 type tokenCreateGrantCheck struct{}
