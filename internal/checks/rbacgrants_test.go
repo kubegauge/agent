@@ -38,6 +38,27 @@ func saSubject(namespace, name string) rbacv1.Subject {
 	return rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: name, Namespace: namespace}
 }
 
+// grantRole builds a namespaced Role with a single PolicyRule.
+func grantRole(namespace, name string, apiGroups, resources, verbs []string) rbacv1.Role {
+	return rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: apiGroups,
+			Resources: resources,
+			Verbs:     verbs,
+		}},
+	}
+}
+
+// grantRB builds a RoleBinding, living in namespace, pointing at a Role by name.
+func grantRB(namespace, name, roleName string, subjects ...rbacv1.Subject) rbacv1.RoleBinding {
+	return rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		RoleRef:    rbacv1.RoleRef{Kind: "Role", Name: roleName},
+		Subjects:   subjects,
+	}
+}
+
 func TestNodesProxyGrantCheck(t *testing.T) {
 	tests := []struct {
 		name string
@@ -132,6 +153,34 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			snap: &snapshot.Snapshot{
 				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
 					grantCRB("ghost", "does-not-exist", saSubject("ops", "someone")),
+				},
+			},
+			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "a namespaced role granting nodes/proxy warns and names the rolebinding",
+			snap: &snapshot.Snapshot{
+				Roles: []rbacv1.Role{
+					grantRole("team-a", "proxy-role", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
+				},
+				RoleBindings: []rbacv1.RoleBinding{
+					grantRB("team-a", "proxy-binding", "proxy-role", saSubject("team-a", "debugger")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"team-a"},
+				AffectedResources: []string{"rolebinding/team-a/proxy-binding"},
+			},
+		},
+		{
+			name: "a rolebinding naming a Role that exists only in a different namespace does not resolve",
+			snap: &snapshot.Snapshot{
+				Roles: []rbacv1.Role{
+					grantRole("team-b", "proxy-role", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
+				},
+				RoleBindings: []rbacv1.RoleBinding{
+					grantRB("team-a", "proxy-binding", "proxy-role", saSubject("team-a", "debugger")),
 				},
 			},
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
