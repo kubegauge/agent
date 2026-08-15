@@ -237,6 +237,34 @@ func workloadResourceRef(kind, namespace, name string) string {
 	return prefix + "/" + namespace + "/" + name
 }
 
+// benchmarkOmitsControl reports whether the CIS benchmark that applies to this cluster has no
+// control matching the calling check — the "we will not claim conformance with something your
+// auditor's document does not contain" gate. CIS publishes a separate benchmark per distribution,
+// and the EKS/GKE/AKS ones delete the etcd section, shifting everything below it up one; some
+// controls vanish outright rather than move.
+//
+// KubeadmConfigMapFound overrides the distribution on purpose. DetectDistribution tests a node's
+// aws:// or gce:// providerID BEFORE it checks for the kubeadm ConfigMap, so a plain kubeadm
+// cluster on EC2 detects as "eks" and one on GCE VMs detects as "gke". Those clusters follow the
+// self-managed benchmark, where the control DOES exist — reporting "na" for them would be the
+// product claiming it cannot assess something it can.
+//
+// Deliberately NOT isManagedControlPlane: that helper also returns true whenever the apiserver
+// static pod is invisible, which would drag k3s and every self-hosted control plane into "na" for
+// a reason that has nothing to do with which benchmark applies.
+func benchmarkOmitsControl(snap *snapshot.Snapshot, distros ...string) bool {
+	if snap.KubeadmConfigMapFound {
+		return false
+	}
+	d := detectedDistribution(snap)
+	for _, x := range distros {
+		if x == d {
+			return true
+		}
+	}
+	return false
+}
+
 // workloadSetResult builds a Result from a set of violating workload resource refs (already
 // formatted by workloadResourceRef) and the namespaces they belong to: status when non-empty,
 // "pass" when empty. The M3, workload-based equivalent of namespaceResult (netpol.go).

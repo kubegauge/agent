@@ -219,6 +219,10 @@ type nodesProxyGrantCheck struct{}
 func (nodesProxyGrantCheck) ID() string { return "KG-RB-010" }
 
 func (nodesProxyGrantCheck) Run(snap *snapshot.Snapshot) Result {
+	// CIS 5.1.10 has no counterpart in the GKE benchmark.
+	if benchmarkOmitsControl(snap, "gke") {
+		return Result{Status: "na", Namespaces: []string{}, AffectedResources: []string{}}
+	}
 	return boundGrantResult(snap, []grantMatcher{nodesProxyMatcher}, "warn")
 }
 
@@ -373,6 +377,11 @@ func (systemMastersBindingCheck) ID() string { return "KG-RB-007" }
 // in-cluster agent sees one, on any distribution. This check detects additional BINDINGS to the
 // group and nothing else.
 func (systemMastersBindingCheck) Run(snap *snapshot.Snapshot) Result {
+	// CIS 5.1.7 was removed from the EKS benchmark at 1.7.0 and never existed in the AKS one.
+	if benchmarkOmitsControl(snap, "eks", "aks") {
+		return Result{Status: "na", Namespaces: []string{}, AffectedResources: []string{}}
+	}
+
 	var resources []string
 	nsSet := map[string]bool{}
 

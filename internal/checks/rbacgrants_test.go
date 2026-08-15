@@ -202,9 +202,14 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
 		},
 		{
-			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			// EKS, not GKE: KG-RB-010 (CIS 5.1.10) has no GKE counterpart and now reports "na"
+			// unconditionally there (see TestNodesProxyNaOnGke), which would make gkeNode() unable
+			// to reach the provider-managed downgrade this subtest exercises at all. EKS isn't
+			// na-gated for this check, and isProviderManagedRole treats the addon-manager label the
+			// same regardless of which of eks/gke/aks triggered it.
+			name: "an addon-manager labeled role on EKS is downgraded, not silenced",
 			snap: &snapshot.Snapshot{
-				Nodes: []corev1.Node{gkeNode()},
+				Nodes: []corev1.Node{eksNode()},
 				ClusterRoles: []rbacv1.ClusterRole{
 					labeledClusterRole("kubelet-api-admin",
 						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
@@ -240,9 +245,11 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 			},
 		},
 		{
-			name: "an unlabeled customer role on GKE still warns",
+			// EKS, not GKE — same reason as above: gkeNode() would now short-circuit to "na" before
+			// ever reaching the warn/downgrade logic this subtest is pinning.
+			name: "an unlabeled customer role on EKS still warns",
 			snap: &snapshot.Snapshot{
-				Nodes: []corev1.Node{gkeNode()},
+				Nodes: []corev1.Node{eksNode()},
 				ClusterRoles: []rbacv1.ClusterRole{
 					grantClusterRole("our-debugger", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
 				},
@@ -678,6 +685,63 @@ func TestSystemMastersBindingCheck(t *testing.T) {
 				t.Errorf("Run() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestBenchmarkOmitsControlGuard pins the false-na trap directly: a plain kubeadm cluster whose
+// nodes carry an EKS-shaped providerID (kubeadm bootstrapped on raw EC2 instances) must still
+// evaluate KG-RB-007, because report.DetectDistribution resolves aws:// to "eks" before it ever
+// looks at KubeadmConfigMapFound. Gating benchmarkOmitsControl on distribution alone would report
+// "na" to a cluster the control genuinely applies to.
+func TestBenchmarkOmitsControlGuard(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *snapshot.Snapshot
+		want string
+	}{
+		{
+			name: "KG-RB-007 is na on a real EKS cluster",
+			snap: &snapshot.Snapshot{Nodes: []corev1.Node{eksNode()}},
+			want: "na",
+		},
+		{
+			name: "KG-RB-007 still evaluates on kubeadm running on EC2",
+			snap: &snapshot.Snapshot{
+				Nodes:                 []corev1.Node{eksNode()},
+				KubeadmConfigMapFound: true,
+			},
+			want: "pass",
+		},
+		{
+			name: "KG-RB-007 evaluates normally on GKE, where the control exists",
+			snap: &snapshot.Snapshot{Nodes: []corev1.Node{gkeNode()}},
+			want: "pass",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (systemMastersBindingCheck{}).Run(tt.snap).Status; got != tt.want {
+				t.Errorf("Status = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNodesProxyNaOnGke covers KG-RB-010's own gate: "na" on GKE (CIS 5.1.10 has no GKE
+// counterpart), but still evaluated on a kubeadm cluster running on GCE VMs, which detects as
+// "gke" the same way kubeadm-on-EC2 detects as "eks".
+func TestNodesProxyNaOnGke(t *testing.T) {
+	naSnap := &snapshot.Snapshot{Nodes: []corev1.Node{gkeNode()}}
+	if got := (nodesProxyGrantCheck{}).Run(naSnap).Status; got != "na" {
+		t.Errorf("on GKE, Status = %q, want \"na\"", got)
+	}
+	kubeadmOnGce := &snapshot.Snapshot{
+		Nodes:                 []corev1.Node{gkeNode()},
+		KubeadmConfigMapFound: true,
+	}
+	if got := (nodesProxyGrantCheck{}).Run(kubeadmOnGce).Status; got != "pass" {
+		t.Errorf("on kubeadm-on-GCE, Status = %q, want \"pass\"", got)
 	}
 }
 
