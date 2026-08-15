@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -57,6 +58,21 @@ func grantRB(namespace, name, roleName string, subjects ...rbacv1.Subject) rbacv
 		RoleRef:    rbacv1.RoleRef{Kind: "Role", Name: roleName},
 		Subjects:   subjects,
 	}
+}
+
+// gkeNode builds a Node whose providerID makes DetectDistribution report "gke".
+func gkeNode() corev1.Node {
+	return corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "gke-node-1"},
+		Spec:       corev1.NodeSpec{ProviderID: "gce://proj/zone/gke-node-1"},
+	}
+}
+
+// labeledClusterRole builds a ClusterRole carrying labels, for the provider-managed tests.
+func labeledClusterRole(name string, labels map[string]string, apiGroups, resources, verbs []string) rbacv1.ClusterRole {
+	cr := grantClusterRole(name, apiGroups, resources, verbs)
+	cr.Labels = labels
+	return cr
 }
 
 func TestNodesProxyGrantCheck(t *testing.T) {
@@ -184,6 +200,61 @@ func TestNodesProxyGrantCheck(t *testing.T) {
 				},
 			},
 			want: Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}},
+		},
+		{
+			name: "an addon-manager labeled role on GKE is downgraded, not silenced",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("kubelet-api-admin",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{""}, []string{"nodes/proxy"}, []string{"*"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("kubelet-api", "kubelet-api-admin", saSubject("kube-system", "kubelet")),
+				},
+			},
+			want: Result{
+				Status:            "info",
+				Namespaces:        []string{},
+				AffectedResources: []string{"clusterrolebinding/kubelet-api"},
+			},
+		},
+		{
+			name: "the same labeled role on a kubeadm cluster is NOT downgraded",
+			snap: &snapshot.Snapshot{
+				KubeadmConfigMapFound: true,
+				ClusterRoles: []rbacv1.ClusterRole{
+					labeledClusterRole("kubelet-api-admin",
+						map[string]string{"addonmanager.kubernetes.io/mode": "Reconcile"},
+						[]string{""}, []string{"nodes/proxy"}, []string{"*"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("kubelet-api", "kubelet-api-admin", saSubject("ops", "someone")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/kubelet-api"},
+			},
+		},
+		{
+			name: "an unlabeled customer role on GKE still warns",
+			snap: &snapshot.Snapshot{
+				Nodes: []corev1.Node{gkeNode()},
+				ClusterRoles: []rbacv1.ClusterRole{
+					grantClusterRole("our-debugger", []string{""}, []string{"nodes/proxy"}, []string{"get"}),
+				},
+				ClusterRoleBindings: []rbacv1.ClusterRoleBinding{
+					grantCRB("our-debugger", "our-debugger", saSubject("ops", "debugger")),
+				},
+			},
+			want: Result{
+				Status:            "warn",
+				Namespaces:        []string{"ops"},
+				AffectedResources: []string{"clusterrolebinding/our-debugger"},
+			},
 		},
 	}
 

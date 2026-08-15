@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubegauge/agent/internal/snapshot"
 )
@@ -55,6 +56,43 @@ func ruleMatchesGrant(rule rbacv1.PolicyRule, m grantMatcher) bool {
 	return matchesAny(rule.Verbs, m.Verbs)
 }
 
+// providerManagedLabels are labels a managed distribution stamps on the RBAC objects it owns and
+// reconciles. Detection is by LABEL ONLY, deliberately: a label key that turns out to be wrong
+// simply never matches and costs nothing, whereas a hardcoded role NAME that turns out to be wrong
+// either misses the object it was meant for or, worse, downgrades something the customer created.
+// No role name is hardcoded anywhere in this file.
+//
+//   - addonmanager.kubernetes.io/mode: GKE and AKS both run the addon manager and stamp this on
+//     the objects it reconciles. This is the load-bearing entry.
+//   - kubernetes.io/cluster-service: AKS additionally uses this on its own objects.
+//   - eks.amazonaws.com/component: EKS coverage is PARTIAL and this key is unverified against a
+//     live cluster. EKS labels its objects inconsistently — some carry this, some carry nothing,
+//     and aws-node carries app.kubernetes.io/managed-by: Helm, indistinguishable from a customer
+//     release. An EKS object with no label gets no downgrade and will surface as a finding the
+//     customer cannot act on. That gap is recorded in the dashboard's BACKLOG rather than closed
+//     with a guessed name list.
+var providerManagedLabels = []string{
+	"addonmanager.kubernetes.io/mode",
+	"kubernetes.io/cluster-service",
+	"eks.amazonaws.com/component",
+}
+
+// isProviderManagedRole reports whether obj is owned by the detected distribution rather than by
+// the customer. Gated on the distribution on purpose: a role carrying a provider label on a
+// kubeadm cluster is not the provider's, and must keep being reported.
+func isProviderManagedRole(obj metav1.Object, distro string) bool {
+	if distro != "eks" && distro != "gke" && distro != "aks" {
+		return false
+	}
+	labels := obj.GetLabels()
+	for _, key := range providerManagedLabels {
+		if _, ok := labels[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // grantResolver answers "does this RoleRef confer the grant m describes?" over the snapshot's
 // (Cluster)Roles — the same tiny slice of an RBAC authorizer podCreateRoleResolver models for
 // KG-RB-004, generalized to an arbitrary grantMatcher. It does not model aggregation or
@@ -90,37 +128,62 @@ func (r grantResolver) rulesFor(ref rbacv1.RoleRef, bindingNamespace string) ([]
 	return role.Rules, role.Name, ok
 }
 
-// grants reports whether ref confers ANY of the grants matchers describes. It takes a slice rather
-// than a single matcher because CIS 5.1.8 names three verbs living in two different API groups —
-// bind and escalate act on RBAC objects, impersonate acts on core identities — and one check has
-// to cover both. The single-target checks pass a one-element slice.
-func (r grantResolver) grants(ref rbacv1.RoleRef, bindingNamespace string, matchers []grantMatcher) bool {
-	rules, name, ok := r.rulesFor(ref, bindingNamespace)
-	if !ok || !isCustomRoleName(name) {
-		return false
+// grants reports whether ref confers any of the grants matchers describes, and returns the
+// resolved role object so the caller can decide whether the distribution owns it.
+func (r grantResolver) grants(ref rbacv1.RoleRef, bindingNamespace string, matchers []grantMatcher) (metav1.Object, bool) {
+	var rules []rbacv1.PolicyRule
+	var meta *metav1.ObjectMeta
+	if ref.Kind == "ClusterRole" {
+		cr, ok := r.clusterRoles[ref.Name]
+		if !ok || !isCustomRoleName(cr.Name) {
+			return nil, false
+		}
+		rules, meta = cr.Rules, &cr.ObjectMeta
+	} else {
+		role, ok := r.roles[bindingNamespace+"/"+ref.Name]
+		if !ok || !isCustomRoleName(role.Name) {
+			return nil, false
+		}
+		rules, meta = role.Rules, &role.ObjectMeta
 	}
 	for _, rule := range rules {
 		for _, m := range matchers {
 			if ruleMatchesGrant(rule, m) {
-				return true
+				return meta, true
 			}
 		}
 	}
-	return false
+	return nil, false
 }
 
-// boundGrantResult is the shape every matcher-driven KG-RB check shares: walk both binding kinds,
-// resolve each roleRef, and report the BINDING — the object that creates the access and the object
-// an operator edits — whenever a non-system subject holds the grant. Namespaces carries the
-// namespaces of the ServiceAccount subjects that hold it, which is what the dashboard's namespace
-// filter matches against.
+// boundGrantResult is the shape every matcher-driven KG-RB check shares. A grant whose role the
+// detected distribution owns is DOWNGRADED to "info" rather than dropped: the access is a real
+// attack path if the identity is ever widened, it just is not the customer's misconfiguration.
+// Hiding it would be the product concealing something it measured; reporting it as the customer's
+// fault would be the product blaming them for something they cannot change.
+//
+// The provider-managed check runs before, and independent of, the non-system-subject filter: the
+// entire reason KG-RB-010 misfires on kubelet-api-admin is that GKE binds it to a system identity
+// (a kube-system ServiceAccount, or a system:* group) — the exact shape a customer-facing binding
+// with only system subjects is normally excluded for. Gating the provider check behind that filter
+// would leave the real GKE case unreported instead of downgraded, defeating the point of this
+// check. The filter still applies to the customer bucket: a genuinely customer-irrelevant binding
+// (only system subjects, role NOT provider-managed) stays unreported, same as before this check.
 func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStatus string) Result {
 	resolver := newGrantResolver(snap)
-	var resources []string
+	distro := detectedDistribution(snap)
+	var customer, provider []string
 	nsSet := map[string]bool{}
 
-	record := func(ref string, subjects []rbacv1.Subject) {
-		resources = append(resources, ref)
+	consider := func(ref string, roleObj metav1.Object, subjects []rbacv1.Subject) {
+		if isProviderManagedRole(roleObj, distro) {
+			provider = append(provider, ref)
+			return
+		}
+		if !hasNonSystemSubject(subjects) {
+			return
+		}
+		customer = append(customer, ref)
 		for _, s := range subjects {
 			if !isSystemSubject(s) && s.Kind == rbacv1.ServiceAccountKind && s.Namespace != "" {
 				nsSet[s.Namespace] = true
@@ -129,27 +192,27 @@ func boundGrantResult(snap *snapshot.Snapshot, matchers []grantMatcher, failStat
 	}
 
 	for _, crb := range snap.ClusterRoleBindings {
-		if !hasNonSystemSubject(crb.Subjects) {
-			continue
-		}
-		if resolver.grants(crb.RoleRef, "", matchers) {
-			record("clusterrolebinding/"+crb.Name, crb.Subjects)
+		if obj, ok := resolver.grants(crb.RoleRef, "", matchers); ok {
+			consider("clusterrolebinding/"+crb.Name, obj, crb.Subjects)
 		}
 	}
 	for _, rb := range snap.RoleBindings {
-		if !hasNonSystemSubject(rb.Subjects) {
-			continue
-		}
-		if resolver.grants(rb.RoleRef, rb.Namespace, matchers) {
-			record("rolebinding/"+rb.Namespace+"/"+rb.Name, rb.Subjects)
+		if obj, ok := resolver.grants(rb.RoleRef, rb.Namespace, matchers); ok {
+			consider("rolebinding/"+rb.Namespace+"/"+rb.Name, obj, rb.Subjects)
 		}
 	}
 
-	if len(resources) == 0 {
+	switch {
+	case len(customer) > 0:
+		all := append(append([]string(nil), customer...), provider...)
+		sort.Strings(all)
+		return Result{Status: failStatus, Namespaces: sortedKeys(nsSet), AffectedResources: all}
+	case len(provider) > 0:
+		sort.Strings(provider)
+		return Result{Status: "info", Namespaces: []string{}, AffectedResources: provider}
+	default:
 		return Result{Status: "pass", Namespaces: []string{}, AffectedResources: []string{}}
 	}
-	sort.Strings(resources)
-	return Result{Status: failStatus, Namespaces: sortedKeys(nsSet), AffectedResources: resources}
 }
 
 // ---- KG-RB-010: access to the nodes/proxy sub-resource (CIS 5.1.10) ---------------------------
